@@ -75,15 +75,6 @@ Your Browser
 
 ---
 
-## Demo Login Credentials
-
-| Role        | Email                  | Password  |
-|-------------|------------------------|-----------|
-| Super Admin | superadmin@ion.com     | Admin@123 |
-| Sub Admin   | subadmin@ion.com       | Sub@123   |
-| User        | user@ion.com           | User@123  |
-| Viewer      | viewer@ion.com         | View@123  |
-
 ---
 
 ## For Future Updates
