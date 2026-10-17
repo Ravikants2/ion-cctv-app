@@ -89,6 +89,12 @@ export async function loadFromGitHub(): Promise<AppData> {
   const sha = json.sha;
   const decoded = JSON.parse(atob(json.content.replace(/\n/g, ''))) as AppData;
   localStorage.setItem(LOCAL_SHA, sha);
+  if (!Array.isArray(decoded.users) || decoded.users.length === 0) {
+    const initialized = { ...decoded, users: getInitialData().users };
+    writeLocal(initialized);
+    await saveToGitHub(initialized);
+    return initialized;
+  }
   writeLocal(decoded);
   return decoded;
 }
