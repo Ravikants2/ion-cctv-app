@@ -21,6 +21,8 @@ export function FilterProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// The provider and its matching hook intentionally share this context module.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useFilters() {
   const ctx = useContext(FilterContext);
   if (!ctx) throw new Error('useFilters must be used within FilterProvider');

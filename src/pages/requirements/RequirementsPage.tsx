@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -15,6 +15,7 @@ interface PreviewRow extends Partial<RequirementMaster> {
 
 export default function RequirementsPage() {
   const { data, updateData, addAuditLog, can, currentUser } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [filterClient, setFilterClient] = useState('');
   const [filterExam, setFilterExam] = useState('');
@@ -133,10 +134,10 @@ export default function RequirementsPage() {
             <Download size={14} /> Template
           </Button>
           {can('upload_master') && (
-            <label className="cursor-pointer">
-              <Button variant="secondary" size="sm" as="span"><Upload size={14} /> Upload</Button>
-              <input type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
-            </label>
+            <>
+              <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Upload</Button>
+              <input ref={fileInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
+            </>
           )}
           {can('upload_master') && (
             <Button size="sm" onClick={() => setAddModal(true)}><Plus size={14} /> Add</Button>

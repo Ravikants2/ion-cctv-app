@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -10,6 +10,7 @@ import { Download, Upload, Trash2, Plus } from 'lucide-react';
 
 export default function VendorsPage() {
   const { data, updateData, addAuditLog, can, currentUser } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [filterZone, setFilterZone] = useState('');
   const [preview, setPreview] = useState<Array<Partial<VendorMaster> & { status: 'NEW' | 'UPDATE' | 'ERROR'; error?: string }> | null>(null);
@@ -98,10 +99,10 @@ export default function VendorsPage() {
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => downloadTemplate('vendor')}><Download size={14} /> Template</Button>
           {can('upload_master') && (
-            <label className="cursor-pointer">
-              <Button variant="secondary" size="sm" as="span"><Upload size={14} /> Upload</Button>
-              <input type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
-            </label>
+            <>
+              <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Upload</Button>
+              <input ref={fileInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
+            </>
           )}
           {can('upload_master') && <Button size="sm" onClick={() => setAddModal(true)}><Plus size={14} /> Add</Button>}
         </div>

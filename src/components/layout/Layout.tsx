@@ -39,12 +39,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
   };
 
   const SyncIcon = () => {
-    if (!isGitHub) return <CloudOff size={14} className="text-white/40" title="GitHub not configured" />;
+    if (!isGitHub) return <span title="GitHub not configured"><CloudOff size={14} className="text-white/40" /></span>;
     if (syncStatus === 'loading') return <Loader2 size={14} className="text-white/70 animate-spin" />;
     if (syncStatus === 'saving')  return <Loader2 size={14} className="text-yellow-300 animate-spin" />;
     if (syncStatus === 'saved')   return <CheckCircle2 size={14} className="text-green-300" />;
-    if (syncStatus === 'error')   return <AlertCircle size={14} className="text-red-300" title={syncError} />;
-    return <Cloud size={14} className="text-white/60" title="Synced with GitHub" />;
+    if (syncStatus === 'error')   return <span title={syncError}><AlertCircle size={14} className="text-red-300" /></span>;
+    return <span title="Synced with GitHub"><Cloud size={14} className="text-white/60" /></span>;
   };
 
   return (

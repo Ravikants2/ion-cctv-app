@@ -6,7 +6,6 @@ import { Button } from '../../components/ui/Button';
 import { Input, Select, Textarea } from '../../components/ui/FormFields';
 import { Alert } from '../../components/ui/index';
 import type { InstallationRecord, ExamDateDetail, InstallationType, StorageType, StorageUnit } from '../../types';
-import { getInstallationStats } from '../../utils/calculations';
 import { Plus, Trash2, FileText, Eye } from 'lucide-react';
 
 interface ExamDateRow {
@@ -18,7 +17,7 @@ interface ExamDateRow {
 export default function InstallationFormPage() {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
-  const { data, updateData, addAuditLog, can, currentUser } = useAuth();
+  const { data, updateData, addAuditLog, currentUser } = useAuth();
 
   const isEdit = !!id;
   const existingRecord = isEdit ? data.installations.find(i => i.id === id) : undefined;

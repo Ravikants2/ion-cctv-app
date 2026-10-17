@@ -1,7 +1,7 @@
 import type { InstallationRecord, ExamDateDetail, RequirementMaster, VendorMaster, DashboardFilters } from '../types';
 
 export function formatINR(amount: number): string {
-  if (isNaN(amount)) return '₹0';
+  if (isNaN(amount) || amount === 0) return '₹0';
   return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
@@ -35,9 +35,10 @@ export function applyDashboardFilters(
     if (filters.zone && req.zone !== filters.zone) return false;
     if (filters.startDate || filters.endDate) {
       const dates = examDates.filter(d => d.installationRecordId === inst.id).map(d => d.examDate);
-      if (dates.length === 0) return false;
-      if (filters.startDate && !dates.some(d => d >= filters.startDate)) return false;
-      if (filters.endDate && !dates.some(d => d <= filters.endDate)) return false;
+      if (!dates.some(d =>
+        (!filters.startDate || d >= filters.startDate) &&
+        (!filters.endDate || d <= filters.endDate)
+      )) return false;
     }
     return true;
   });
@@ -52,7 +53,7 @@ export function getUniqueExamDays(installations: InstallationRecord[], examDates
 export function getDashboardKPIs(
   installations: InstallationRecord[],
   requirements: RequirementMaster[],
-  vendors: VendorMaster[],
+  _vendors: VendorMaster[],
   examDates: ExamDateDetail[]
 ) {
   const totalCost = installations.reduce((s, i) => s + i.localVendorCost, 0);

@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Alert, Badge } from '../../components/ui/index';
 import { downloadTemplate, parseBulkInstallationFile, type BulkInstallationRow } from '../../utils/excel';
-import type { InstallationRecord, ExamDateDetail } from '../../types';
+import type { InstallationRecord } from '../../types';
 import { Download, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -19,6 +19,7 @@ interface ValidatedRow extends BulkInstallationRow {
 
 export default function BulkUploadPage() {
   const { data, updateData, addAuditLog, currentUser } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ValidatedRow[] | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -161,10 +162,8 @@ export default function BulkUploadPage() {
         <h1 className="text-xl font-bold text-gray-900">Bulk Installation Upload</h1>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => downloadTemplate('installation')}><Download size={14} /> Template</Button>
-          <label className="cursor-pointer">
-            <Button variant="secondary" size="sm" as="span"><Upload size={14} /> Upload File</Button>
-            <input type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFile} />
-          </label>
+          <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Upload File</Button>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFile} />
         </div>
       </div>
 

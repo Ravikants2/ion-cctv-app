@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
@@ -21,7 +20,6 @@ interface DrillState {
 export default function ExecutiveDashboard() {
   const { data } = useAuth();
   const { filters } = useFilters();
-  const navigate = useNavigate();
   const [drill, setDrill] = useState<DrillState>({ level: 'top' });
   const [kpiDetail, setKpiDetail] = useState<string | null>(null);
 
@@ -168,19 +166,18 @@ export default function ExecutiveDashboard() {
             <button onClick={() => setDrill({ level: 'top' })} className="text-blue-600 hover:underline text-sm">← Back</button>
             <span className="text-sm text-gray-500">Drill-down: {drill.client}</span>
           </div>
-          <DrillDownTable data={data} filtered={filtered} drill={drill} setDrill={setDrill} navigate={navigate} />
+          <DrillDownTable data={data} filtered={filtered} drill={drill} setDrill={setDrill} />
         </div>
       )}
     </div>
   );
 }
 
-function DrillDownTable({ data, filtered, drill, setDrill, navigate }: {
+function DrillDownTable({ data, filtered, drill, setDrill }: {
   data: ReturnType<typeof useAuth>['data'];
   filtered: ReturnType<typeof useAuth>['data']['installations'];
   drill: DrillState;
   setDrill: (d: DrillState) => void;
-  navigate: ReturnType<typeof useNavigate>;
 }) {
   const getRows = () => {
     const reqs = data.requirements.filter(r => {
