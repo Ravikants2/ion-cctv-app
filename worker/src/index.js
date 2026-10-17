@@ -164,7 +164,7 @@ export default {
       let geminiResponse;
       try {
         geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL || 'gemini-2.5-flash')}:generateContent`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL || 'gemini-3.8-flash')}:generateContent`,
           {
             method: 'POST',
             headers: {
@@ -193,8 +193,26 @@ export default {
         return jsonResponse({ error: 'Gemini returned an invalid response.' }, 502, origin);
       }
       if (!geminiResponse.ok) {
-        console.error('Gemini request failed with status', geminiResponse.status);
-        return jsonResponse({ error: 'Gemini could not answer this request. Check the service configuration and try again.' }, 502, origin);
+        const providerError = isRecord(geminiResult?.error) ? geminiResult.error : {};
+        const providerMessage = typeof providerError.message === 'string'
+          ? providerError.message
+            .replaceAll(env.GEMINI_API_KEY, '[redacted]')
+            .replace(/[\u0000-\u001f\u007f]/g, ' ')
+            .slice(0, 300)
+          : 'No provider error message.';
+        console.error(
+          `Gemini request failed: HTTP ${geminiResponse.status}; ${String(providerError.status || 'unknown')}; ${providerMessage}`
+        );
+
+        let error = 'Gemini could not answer this request. Check the service configuration and try again.';
+        if ([401, 403].includes(geminiResponse.status)) {
+          error = 'Gemini rejected the Worker API key. Configure a valid Gemini API key as the GEMINI_API_KEY Worker secret.';
+        } else if (geminiResponse.status === 404) {
+          error = 'The configured Gemini model was not found or is unavailable. Check GEMINI_MODEL in the Worker configuration.';
+        } else if (geminiResponse.status === 429) {
+          error = 'Gemini rate limit or quota exceeded. Check the Gemini project quota and try again later.';
+        }
+        return jsonResponse({ error }, 502, origin);
       }
 
       const answer = geminiResult?.candidates?.[0]?.content?.parts
