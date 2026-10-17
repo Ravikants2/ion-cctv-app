@@ -103,6 +103,8 @@ The **AI Chat** page sends the current requirements, vendors, installations, exa
 
 The Gemini key must stay in the Worker and must never be added to the frontend, a `VITE_*` secret, or this repository.
 
+The Worker uses `gemini-3.1-flash-lite` by default and retries a request with `gemini-3.8-flash` if the first model returns HTTP 404 (unavailable model) or 429 (rate limit/quota). These defaults can be changed with the `GEMINI_MODEL` and `GEMINI_FALLBACK_MODEL` variables in `worker/wrangler.toml`. A different model may have separate model-specific limits, but no model is guaranteed to have unlimited quota; check the active project limits in Google AI Studio.
+
 ### Deploy the chat Worker
 
 1. Create a Cloudflare account and install Wrangler (`npm install --global wrangler`), then authenticate with `npx wrangler login`.

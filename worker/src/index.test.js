@@ -5,7 +5,8 @@ import worker from './index.js';
 const env = {
   ALLOWED_ORIGINS: 'https://ravikants2.github.io',
   GEMINI_API_KEY: 'test-secret',
-  GEMINI_MODEL: 'gemini-3.8-flash',
+  GEMINI_MODEL: 'gemini-3.1-flash-lite',
+  GEMINI_FALLBACK_MODEL: 'gemini-3.8-flash',
 };
 
 function createRequest() {
@@ -53,6 +54,23 @@ describe('Gemini response completion', () => {
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(requestBody.generationConfig.maxOutputTokens).toBe(4_096);
     expect(requestBody.systemInstruction.parts[0].text).toContain('verify that the answer includes all requested rows and totals');
+    expect(fetchMock.mock.calls[0][0]).toContain('/models/gemini-3.1-flash-lite:generateContent');
+  });
+
+  it.each([404, 429])('retries HTTP %s responses with the fallback model', async status => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { status: 'RESOURCE_EXHAUSTED', message: 'quota exceeded' },
+      }), { status }))
+      .mockResolvedValueOnce(geminiResponse('Fallback model answer.'));
+
+    const response = await worker.fetch(createRequest(), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ answer: 'Fallback model answer.' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toContain('/models/gemini-3.1-flash-lite:generateContent');
+    expect(fetchMock.mock.calls[1][0]).toContain('/models/gemini-3.8-flash:generateContent');
   });
 
   it('continues an answer when Gemini reports the output token limit', async () => {

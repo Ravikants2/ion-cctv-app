@@ -4,6 +4,9 @@ const MAX_MESSAGE_CHARS = 2_000;
 const MAX_HISTORY_TURNS = 10;
 const MAX_ROWS_PER_TYPE = 5_000;
 const MAX_FIELD_CHARS = 2_000;
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-3.8-flash';
+const FALLBACK_HTTP_STATUSES = new Set([404, 429]);
 
 class RequestError extends Error {
   constructor(message, status = 400) {
@@ -107,6 +110,31 @@ function jsonResponse(body, status, origin) {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers });
 }
 
+async function generateContent(env, requestBody, preferredModel) {
+  const models = [...new Set([
+    preferredModel,
+    env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
+    env.GEMINI_FALLBACK_MODEL || DEFAULT_GEMINI_FALLBACK_MODEL,
+  ].filter(Boolean))];
+
+  for (const [index, model] of models.entries()) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': env.GEMINI_API_KEY,
+        },
+        body: JSON.stringify(requestBody),
+      }
+    );
+    if (!FALLBACK_HTTP_STATUSES.has(response.status) || index === models.length - 1) {
+      return { response, model };
+    }
+  }
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin');
@@ -163,24 +191,15 @@ export default {
       ];
 
       let geminiResponse;
+      let geminiModel;
       try {
-        geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL || 'gemini-3.8-flash')}:generateContent`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-goog-api-key': env.GEMINI_API_KEY,
-            },
-            body: JSON.stringify({
-              systemInstruction: {
-                parts: [{ text: systemInstruction }],
-              },
-              contents,
-              generationConfig: { temperature: 0.2, maxOutputTokens: 4_096 },
-            }),
-          }
-        );
+        ({ response: geminiResponse, model: geminiModel } = await generateContent(env, {
+          systemInstruction: {
+            parts: [{ text: systemInstruction }],
+          },
+          contents,
+          generationConfig: { temperature: 0.2, maxOutputTokens: 4_096 },
+        }));
       } catch {
         return jsonResponse({ error: 'Could not connect to the Gemini service. Try again later.' }, 502, origin);
       }
@@ -227,30 +246,20 @@ export default {
       if (candidate.finishReason === 'MAX_TOKENS') {
         let continuationResponse;
         try {
-          continuationResponse = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL || 'gemini-3.8-flash')}:generateContent`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': env.GEMINI_API_KEY,
+          ({ response: continuationResponse } = await generateContent(env, {
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            contents: [
+              ...contents,
+              { role: 'model', parts: [{ text: answer }] },
+              {
+                role: 'user',
+                parts: [{
+                  text: 'Continue the answer exactly where it stopped. Do not repeat any completed part. Finish all remaining table rows, calculations, totals, and the final sentence.',
+                }],
               },
-              body: JSON.stringify({
-                systemInstruction: { parts: [{ text: systemInstruction }] },
-                contents: [
-                  ...contents,
-                  { role: 'model', parts: [{ text: answer }] },
-                  {
-                    role: 'user',
-                    parts: [{
-                      text: 'Continue the answer exactly where it stopped. Do not repeat any completed part. Finish all remaining table rows, calculations, totals, and the final sentence.',
-                    }],
-                  },
-                ],
-                generationConfig: { temperature: 0.2, maxOutputTokens: 4_096 },
-              }),
-            }
-          );
+            ],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 4_096 },
+          }, geminiModel));
         } catch {
           return jsonResponse({ error: 'The answer was too long and could not be completed. Please narrow your question and try again.' }, 502, origin);
         }
@@ -263,6 +272,9 @@ export default {
         }
         if (!continuationResponse.ok) {
           console.error('Gemini continuation failed with status', continuationResponse.status);
+          if (continuationResponse.status === 429) {
+            return jsonResponse({ error: 'Gemini rate limit or quota exceeded. Check the Gemini project quota and try again later.' }, 502, origin);
+          }
           return jsonResponse({ error: 'The answer was too long and could not be completed. Please narrow your question and try again.' }, 502, origin);
         }
 
