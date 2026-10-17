@@ -1,0 +1,7 @@
+name = "ion-cctv-gemini-chat"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://ravikants2.github.io"
+GEMINI_MODEL = "gemini-2.5-flash"

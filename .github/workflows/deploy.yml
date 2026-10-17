@@ -49,6 +49,7 @@ jobs:
           VITE_GITHUB_REPO: ${{ github.event.repository.name }}
           VITE_GITHUB_DATA_BRANCH: data
           VITE_GITHUB_TOKEN: ${{ secrets.DATA_PAT }}
+          VITE_GEMINI_CHAT_ENDPOINT: ${{ vars.VITE_GEMINI_CHAT_ENDPOINT }}
         run: npm run build
 
       - name: Copy 404.html for SPA routing

@@ -95,3 +95,30 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 - Role-based access: Super Admin / Sub Admin / User / Viewer
 - Backup & Restore (JSON download/upload from header menu)
 - All data synced to GitHub `data` branch
+- Gemini-powered chat over structured application records
+
+## Gemini data chat (demo setup)
+
+The **AI Chat** page sends the current requirements, vendors, installations, exam dates, and chat messages to Gemini through a Cloudflare Worker. It excludes user accounts/password hashes, audit logs, and quotation file contents. Chat history is kept only in the current browser tab and is not saved.
+
+The Gemini key must stay in the Worker and must never be added to the frontend, a `VITE_*` secret, or this repository.
+
+### Deploy the chat Worker
+
+1. Create a Cloudflare account and install Wrangler (`npm install --global wrangler`), then authenticate with `npx wrangler login`.
+2. Deploy the Worker from the repository root:
+
+   ```powershell
+   npx wrangler deploy --config worker/wrangler.toml
+   ```
+
+3. Store the rotated Gemini key as a Worker secret (do not paste it into chat or a source file):
+
+   ```powershell
+   npx wrangler secret put GEMINI_API_KEY --config worker/wrangler.toml
+   ```
+
+4. In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables** and add `VITE_GEMINI_CHAT_ENDPOINT` with the HTTPS URL Wrangler assigned to the Worker. Re-run the Pages workflow to publish the chat endpoint configuration.
+5. For local development, set `VITE_GEMINI_CHAT_ENDPOINT` in an ignored `.env.local` file. Set the Worker `ALLOWED_ORIGINS` to include `http://localhost:5173` when testing locally; keep the production GitHub Pages origin in the list as well.
+
+The Worker allows only the configured browser origins, limits request size, and forwards the Gemini key only in a server-to-server request. **This is still a demo, not production authorization:** CORS does not authenticate users, and the app's existing login runs in the browser. Do not use chat with sensitive/confidential data or rely on it for per-user data isolation. Production use requires server-verified authentication, access checks, and rate limiting before enabling this endpoint for real users.

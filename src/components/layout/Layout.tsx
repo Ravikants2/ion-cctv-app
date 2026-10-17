@@ -7,6 +7,7 @@ import {
   LayoutDashboard, FileText, Users, ClipboardList, TrendingUp,
   Wrench, LogOut, Menu, X, ChevronDown, RefreshCw,
   Download, Upload, Cloud, CloudOff, Loader2, CheckCircle2, AlertCircle,
+  MessageCircle,
 } from 'lucide-react';
 
 const navItems = [
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/requirements',         label: 'Requirements', icon: FileText        },
   { to: '/vendors',              label: 'Vendors',      icon: Users           },
   { to: '/records',              label: 'Records',      icon: ClipboardList   },
+  { to: '/chat',                 label: 'AI Chat',      icon: MessageCircle   },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {

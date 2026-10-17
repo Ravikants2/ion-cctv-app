@@ -14,6 +14,7 @@ import ExecutiveDashboard from './pages/dashboard/ExecutiveDashboard';
 import FinancialDashboard from './pages/dashboard/FinancialDashboard';
 import OperationsDashboard from './pages/dashboard/OperationsDashboard';
 import VendorDashboard from './pages/dashboard/VendorDashboard';
+import ChatPage from './pages/chat/ChatPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { currentUser, syncStatus } = useAuth();
@@ -51,6 +52,7 @@ function AppRoutes() {
       <Route path="/requirements"         element={<ProtectedRoute><RequirementsPage /></ProtectedRoute>} />
       <Route path="/vendors"              element={<ProtectedRoute><VendorsPage /></ProtectedRoute>} />
       <Route path="/records"              element={<ProtectedRoute><RecordsPage /></ProtectedRoute>} />
+      <Route path="/chat"                 element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
       <Route path="/installation/new"     element={<ProtectedRoute><InstallationFormPage /></ProtectedRoute>} />
       <Route path="/installation/edit/:id" element={<ProtectedRoute><InstallationFormPage /></ProtectedRoute>} />
       <Route path="/installation/bulk"    element={<ProtectedRoute><BulkUploadPage /></ProtectedRoute>} />
