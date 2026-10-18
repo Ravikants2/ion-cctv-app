@@ -3,6 +3,33 @@ import type { AppData } from '../types';
 export interface ChatContext {
   summary: string;
   detailsOmitted?: boolean;
+  records: Array<{
+    installationId: string;
+    requirementId: string;
+    vendorId: string;
+    zone: string;
+    state: string;
+    city: string;
+    tcCode: string;
+    tcName: string;
+    clientName: string;
+    examName: string;
+    vendorName: string;
+    vendorZone: string;
+    installationType: AppData['installations'][number]['installationType'];
+    cameraCount: number;
+    proxyProvided: boolean;
+    internetProvided: boolean;
+    storageProvided: boolean;
+    storageType?: AppData['installations'][number]['storageType'];
+    storageQuantity?: number;
+    storageSize?: number;
+    storageUnit?: AppData['installations'][number]['storageUnit'];
+    localVendorCost: number;
+    minimumCost?: number;
+    updatedAt: string;
+    examDates: Array<Pick<AppData['examDates'][number], 'examDate' | 'scheduledCandidates'>>;
+  }>;
   requirements: Array<Pick<
     AppData['requirements'][number],
     'id' | 'zone' | 'state' | 'city' | 'tcCode' | 'tcName' | 'clientName' | 'examName' | 'updatedAt'
@@ -76,6 +103,7 @@ export function buildChatContext(data: AppData, question = ''): ChatContext {
       installations: data.installations.length,
       examDates: data.examDates.length,
     },
+    vendorsByZone: groupTotals(data.vendors, row => row.zone, () => 0),
     installationTotals,
     requirementsByZone: groupTotals(data.requirements, row => row.zone, () => 0),
     requirementsByClient: groupTotals(data.requirements, row => row.clientName, () => 0),
@@ -105,12 +133,45 @@ export function buildChatContext(data: AppData, question = ''): ChatContext {
 
   return {
     summary: JSON.stringify(summary),
-    requirements: detailed ? data.requirements.map(({
+    records: data.installations.map(installation => {
+      const requirement = requirementById.get(installation.requirementId);
+      const vendor = vendorById.get(installation.vendorId);
+      return {
+        installationId: installation.id,
+        requirementId: installation.requirementId,
+        vendorId: installation.vendorId,
+        zone: requirement?.zone || 'Unspecified',
+        state: requirement?.state || 'Unspecified',
+        city: requirement?.city || 'Unspecified',
+        tcCode: requirement?.tcCode || 'Unspecified',
+        tcName: requirement?.tcName || 'Unspecified',
+        clientName: requirement?.clientName || 'Unspecified',
+        examName: requirement?.examName || 'Unspecified',
+        vendorName: vendor?.vendorName || 'Unspecified',
+        vendorZone: vendor?.zone || 'Unspecified',
+        installationType: installation.installationType,
+        cameraCount: installation.cameraCount,
+        proxyProvided: installation.proxyProvided,
+        internetProvided: installation.internetProvided,
+        storageProvided: installation.storageProvided,
+        storageType: installation.storageType,
+        storageQuantity: installation.storageQuantity,
+        storageSize: installation.storageSize,
+        storageUnit: installation.storageUnit,
+        localVendorCost: installation.localVendorCost,
+        minimumCost: installation.minimumCost,
+        updatedAt: installation.updatedAt,
+        examDates: data.examDates
+          .filter(date => date.installationRecordId === installation.id)
+          .map(({ examDate, scheduledCandidates }) => ({ examDate, scheduledCandidates })),
+      };
+    }),
+    requirements: data.requirements.map(({
       id, zone, state, city, tcCode, tcName, clientName, examName, updatedAt,
-    }) => ({ id, zone, state, city, tcCode, tcName, clientName, examName, updatedAt })) : [],
-    vendors: detailed ? data.vendors.map(({ id, zone, vendorName, updatedAt }) => ({
+    }) => ({ id, zone, state, city, tcCode, tcName, clientName, examName, updatedAt })),
+    vendors: data.vendors.map(({ id, zone, vendorName, updatedAt }) => ({
       id, zone, vendorName, updatedAt,
-    })) : [],
+    })),
     installations: detailed ? data.installations.map(({
       id, requirementId, installationType, vendorId, cameraCount, proxyProvided,
       internetProvided, storageProvided, storageType, storageQuantity, storageSize,
@@ -140,8 +201,8 @@ export async function sendChatMessage(
   let requestBody = JSON.stringify(payload);
   const maxRequestBytes = 700_000;
   const encoder = new TextEncoder();
-  const collections: Array<keyof Pick<ChatContext, 'requirements' | 'vendors' | 'installations' | 'examDates'>> = [
-    'installations', 'examDates', 'requirements', 'vendors',
+  const collections: Array<keyof Pick<ChatContext, 'records' | 'requirements' | 'vendors' | 'installations' | 'examDates'>> = [
+    'records', 'installations', 'examDates', 'requirements', 'vendors',
   ];
 
   while (encoder.encode(requestBody).byteLength > maxRequestBytes) {
@@ -155,6 +216,9 @@ export async function sendChatMessage(
     }
 
     switch (largestCollection) {
+      case 'records':
+        payload.context.records = payload.context.records.slice(0, Math.floor(payload.context.records.length / 2));
+        break;
       case 'installations':
         payload.context.installations = payload.context.installations.slice(0, Math.floor(payload.context.installations.length / 2));
         break;
@@ -172,11 +236,21 @@ export async function sendChatMessage(
     requestBody = JSON.stringify(payload);
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: requestBody,
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: requestBody,
+    });
+  } catch (cause) {
+    if (cause instanceof TypeError) {
+      throw new Error(
+        'Unable to reach the chat service. Check that VITE_GEMINI_CHAT_ENDPOINT points to the deployed Worker and that the app origin is allowed by the Worker ALLOWED_ORIGINS setting.'
+      );
+    }
+    throw cause;
+  }
 
   let result: { answer?: unknown; error?: unknown };
   try {

@@ -99,7 +99,7 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 
 ## Gemini data chat (demo setup)
 
-The **AI Chat** page sends the current requirements, vendors, installations, exam dates, and chat messages to Gemini through a Cloudflare Worker. It excludes user accounts/password hashes, audit logs, and quotation file contents. Chat history is kept only in the current browser tab and is not saved.
+The **AI Chat** page sends the current requirements, vendors, joined installation/exam records, and chat messages to Gemini through a Cloudflare Worker. Joined records let it answer cross-category questions (for example, candidates or costs by vendor and exam) and calculate results from the loaded rows. If a question is ambiguous or the data cannot answer it, the assistant asks a follow-up and offers choices from the available data. It excludes user accounts/password hashes, audit logs, and quotation file contents. Chat history is kept only in the current browser tab and is not saved.
 
 The Gemini key must stay in the Worker and must never be added to the frontend, a `VITE_*` secret, or this repository.
 
@@ -122,5 +122,7 @@ The Worker uses `gemini-3.1-flash-lite` by default and retries a request with `g
 
 4. In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables** and add `VITE_GEMINI_CHAT_ENDPOINT` with the HTTPS URL Wrangler assigned to the Worker. Re-run the Pages workflow to publish the chat endpoint configuration.
 5. For local development, set `VITE_GEMINI_CHAT_ENDPOINT` in an ignored `.env.local` file. Set the Worker `ALLOWED_ORIGINS` to include `http://localhost:5173` when testing locally; keep the production GitHub Pages origin in the list as well.
+
+If chat reports that it cannot reach the service, verify that `VITE_GEMINI_CHAT_ENDPOINT` is the deployed Worker URL and that the app's exact origin (including scheme and host) is listed in the Worker `ALLOWED_ORIGINS`; then redeploy the Worker and rebuild the Pages app after changing its endpoint.
 
 The Worker allows only the configured browser origins, limits request size, and forwards the Gemini key only in a server-to-server request. **This is still a demo, not production authorization:** CORS does not authenticate users, and the app's existing login runs in the browser. Do not use chat with sensitive/confidential data or rely on it for per-user data isolation. Production use requires server-verified authentication, access checks, and rate limiting before enabling this endpoint for real users.

@@ -15,6 +15,7 @@ function createRequest(overrides = {}) {
     history: [],
     context: {
       summary: '{}',
+      records: [],
       requirements: [],
       vendors: [],
       installations: [],
@@ -72,7 +73,7 @@ describe('Gemini response completion', () => {
     });
 
     const response = await worker.fetch(createRequest({
-      context: { summary: '{"installations":1000}', requirements: [], vendors: [], installations, examDates: [] },
+      context: { summary: '{"installations":1000}', records: [], requirements: [], vendors: [], installations, examDates: [] },
     }), env);
 
     expect(response.status).toBe(200);
@@ -92,6 +93,54 @@ describe('Gemini response completion', () => {
     expect(requestBody.generationConfig.maxOutputTokens).toBe(4_096);
     expect(requestBody.systemInstruction.parts[0].text).toContain('Keep answers concise by default');
     expect(fetchMock.mock.calls[0][0]).toContain('/models/gemini-3.1-flash-lite:generateContent');
+  });
+
+  it('passes joined records to Gemini and directs it to calculate combinations and offer choices', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(geminiResponse('Vendor A handled 50 candidates for Exam X.'));
+    const context = {
+      summary: '{}',
+      records: [{
+        installationId: 'installation-1',
+        requirementId: 'requirement-1',
+        vendorId: 'vendor-1',
+        zone: 'North',
+        state: 'Delhi',
+        city: 'Delhi',
+        tcCode: 'TC-1',
+        tcName: 'Test Center',
+        clientName: 'Client',
+        examName: 'Exam X',
+        vendorName: 'Vendor A',
+        vendorZone: 'North',
+        installationType: 'Full Vendor',
+        cameraCount: 10,
+        proxyProvided: true,
+        internetProvided: true,
+        storageProvided: false,
+        localVendorCost: 1000,
+        updatedAt: '2026-01-01',
+        examDates: [{ examDate: '2026-02-01', scheduledCandidates: 50 }],
+        ignoredSensitiveField: 'must not be forwarded',
+      }],
+      requirements: [],
+      vendors: [],
+      installations: [],
+      examDates: [],
+    };
+
+    const response = await worker.fetch(createRequest({ context }), env);
+
+    expect(response.status).toBe(200);
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const prompt = requestBody.contents.at(-1).parts[0].text;
+    expect(prompt).toContain('"vendorName":"Vendor A"');
+    expect(prompt).toContain('"examName":"Exam X"');
+    expect(prompt).toContain('"scheduledCandidates":50');
+    expect(prompt).not.toContain('must not be forwarded');
+    expect(requestBody.systemInstruction.parts[0].text).toContain('Calculate counts, sums, averages');
+    expect(requestBody.systemInstruction.parts[0].text).toContain('numbered choices');
+    expect(requestBody.systemInstruction.parts[0].text).toContain('Never multiply an installation-level cost');
   });
 
   it.each([404, 429])('retries HTTP %s responses with the fallback model', async status => {

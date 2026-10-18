@@ -74,6 +74,23 @@ describe('buildChatContext', () => {
     expect(context.installations).toEqual([]);
     expect(context.summary).toContain('installationsByZone');
   });
+
+  it('provides joined vendor, exam, and requirement data for flexible questions', () => {
+    const context = buildChatContext(appData, 'How many candidates by vendor and exam?');
+
+    expect(context.records).toEqual([expect.objectContaining({
+      installationId: 'installation-1',
+      zone: 'North',
+      clientName: 'Client',
+      examName: 'Exam',
+      vendorName: 'Vendor',
+      localVendorCost: 1000,
+      examDates: [{ examDate: '2026-02-01', scheduledCandidates: 50 }],
+    })]);
+    expect(context.requirements).toHaveLength(1);
+    expect(context.vendors).toHaveLength(1);
+    expect(context.installations).toEqual([]);
+  });
 });
 
 describe('sendChatMessage', () => {
@@ -106,6 +123,14 @@ describe('sendChatMessage', () => {
 
     fetchMock.mockRestore();
     vi.unstubAllEnvs();
+  });
+
+  it('explains network and CORS fetch failures with deployment checks', async () => {
+    vi.stubEnv('VITE_GEMINI_CHAT_ENDPOINT', 'https://chat.example/api/chat');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await expect(sendChatMessage('hello', buildChatContext(appData), []))
+      .rejects.toThrow('VITE_GEMINI_CHAT_ENDPOINT');
   });
 
   it('turns oversized detail requests into actionable concise guidance', async () => {
