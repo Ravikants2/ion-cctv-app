@@ -7,6 +7,9 @@ import { Alert, Badge, ConfirmDialog, Modal } from '../../components/ui/index';
 import { downloadTemplate, parseVendorFile } from '../../utils/excel';
 import type { VendorMaster } from '../../types';
 import { Download, Upload, Trash2, Plus } from 'lucide-react';
+import { TablePagination } from '../../components/ui/TablePagination';
+
+const PAGE_SIZE = 25;
 
 export default function VendorsPage() {
   const { data, updateData, addAuditLog, can, currentUser } = useAuth();
@@ -19,6 +22,7 @@ export default function VendorsPage() {
   const [addModal, setAddModal] = useState(false);
   const [form, setForm] = useState<{ zone: string; vendorName: string }>({ zone: '', vendorName: '' });
   const [formError, setFormError] = useState('');
+  const [page, setPage] = useState(1);
 
   const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
 
@@ -27,6 +31,9 @@ export default function VendorsPage() {
     if (search && !v.vendorName.toLowerCase().includes(search.toLowerCase()) && !v.zone.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -111,10 +118,10 @@ export default function VendorsPage() {
       {alert && <div className="mb-4"><Alert type={alert.type} onClose={() => setAlert(null)}>{alert.msg}</Alert></div>}
 
       <div className="flex flex-wrap gap-3 mb-4">
-        <Input placeholder="Search vendor…" value={search} onChange={e => setSearch(e.target.value)} className="w-48" />
-        <Select value={filterZone} onChange={e => setFilterZone(e.target.value)}
+        <Input placeholder="Search vendor…" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="w-48" />
+        <Select value={filterZone} onChange={e => { setFilterZone(e.target.value); setPage(1); }}
           options={zones.map(z => ({ value: z, label: z }))} placeholder="All Zones" className="w-36" />
-        {(filterZone || search) && <Button variant="ghost" size="sm" onClick={() => { setFilterZone(''); setSearch(''); }}>Clear</Button>}
+        {(filterZone || search) && <Button variant="ghost" size="sm" onClick={() => { setFilterZone(''); setSearch(''); setPage(1); }}>Clear</Button>}
       </div>
 
       {preview && (
@@ -152,7 +159,7 @@ export default function VendorsPage() {
           </tr></thead>
           <tbody>
             {filtered.length === 0 ? <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No vendors found.</td></tr>
-              : filtered.map(v => (
+              : pageRows.map(v => (
                 <tr key={v.id} className="border-t hover:bg-gray-50">
                   <td className="px-4 py-3">{v.zone}</td>
                   <td className="px-4 py-3">{v.vendorName}</td>
@@ -164,7 +171,7 @@ export default function VendorsPage() {
               ))}
           </tbody>
         </table>
-        <div className="px-4 py-2 text-xs text-gray-500 border-t">{filtered.length} of {data.vendors.length} vendors</div>
+        <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setPage} />
       </div>
 
       <ConfirmDialog open={!!deleteId} title="Delete Vendor" message="Delete this vendor? This cannot be undone."

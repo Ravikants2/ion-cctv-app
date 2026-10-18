@@ -3,10 +3,13 @@ import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
 import { KPICard } from '../../components/ui/index';
-import { applyDashboardFilters, getDashboardKPIs, formatINR, getInstallationStats } from '../../utils/calculations';
+import { applyDashboardFilters, getDashboardKPIs, getInstallationStats } from '../../utils/calculations';
 import { Building2, Calendar, Users, Camera, DollarSign, TrendingUp, Briefcase, BookOpen, Store } from 'lucide-react';
+import { CostValue } from '../../components/ui/CostValue';
+import { TablePagination } from '../../components/ui/TablePagination';
 
 type DrillLevel = 'top' | 'client' | 'exam' | 'zone' | 'state' | 'city' | 'tc';
+const PAGE_SIZE = 25;
 
 interface DrillState {
   level: DrillLevel;
@@ -22,6 +25,7 @@ export default function ExecutiveDashboard() {
   const { filters } = useFilters();
   const [drill, setDrill] = useState<DrillState>({ level: 'top' });
   const [kpiDetail, setKpiDetail] = useState<string | null>(null);
+  const [detailPage, setDetailPage] = useState(1);
 
   const filtered = applyDashboardFilters(data.installations, data.requirements, data.examDates, filters);
   const kpis = getDashboardKPIs(filtered, data.requirements, data.vendors, data.examDates);
@@ -51,8 +55,8 @@ export default function ExecutiveDashboard() {
     { key: 'examDays', title: 'Unique Exam Days', value: kpis.examDays, icon: <Calendar size={24} />, color: 'green' },
     { key: 'candidates', title: 'Candidates', value: kpis.candidates.toLocaleString('en-IN'), icon: <Users size={24} />, color: 'purple' },
     { key: 'cameras', title: 'Cameras', value: kpis.cameras.toLocaleString('en-IN'), icon: <Camera size={24} />, color: 'orange' },
-    { key: 'totalCost', title: 'Total Cost', value: formatINR(kpis.totalCost), icon: <DollarSign size={24} />, color: 'red' },
-    { key: 'perCandidateCost', title: 'Per Candidate Cost', value: formatINR(kpis.perCandidateCost), icon: <TrendingUp size={24} />, color: 'teal' },
+    { key: 'totalCost', title: 'Total Cost', value: <CostValue amount={kpis.totalCost} />, icon: <DollarSign size={24} />, color: 'red' },
+    { key: 'perCandidateCost', title: 'Per Candidate Cost', value: <CostValue amount={kpis.perCandidateCost} />, icon: <TrendingUp size={24} />, color: 'teal' },
     { key: 'vendors', title: 'Vendors', value: kpis.vendors, icon: <Store size={24} />, color: 'blue' },
     { key: 'clients', title: 'Clients', value: kpis.clients, icon: <Briefcase size={24} />, color: 'green' },
     { key: 'exams', title: 'Exams', value: kpis.exams, icon: <BookOpen size={24} />, color: 'purple' },
@@ -60,6 +64,9 @@ export default function ExecutiveDashboard() {
 
   if (kpiDetail) {
     const detailInsts = filtered;
+    const detailPageCount = Math.max(1, Math.ceil(detailInsts.length / PAGE_SIZE));
+    const currentDetailPage = Math.min(detailPage, detailPageCount);
+    const detailRows = detailInsts.slice((currentDetailPage - 1) * PAGE_SIZE, currentDetailPage * PAGE_SIZE);
     return (
       <div>
         <GlobalFilters />
@@ -75,7 +82,7 @@ export default function ExecutiveDashboard() {
               ))}
             </tr></thead>
             <tbody>
-              {detailInsts.map(inst => {
+              {detailRows.map(inst => {
                 const req = data.requirements.find(r => r.id === inst.requirementId);
                 const { examDays, totalCandidates } = getInstallationStats(inst, data.examDates);
                 return (
@@ -85,12 +92,13 @@ export default function ExecutiveDashboard() {
                     <td className="px-3 py-2">{req?.tcName}</td><td className="px-3 py-2">{req?.clientName}</td>
                     <td className="px-3 py-2">{req?.examName}</td><td className="px-3 py-2 text-center">{examDays}</td>
                     <td className="px-3 py-2 text-right">{totalCandidates.toLocaleString('en-IN')}</td>
-                    <td className="px-3 py-2 text-right">{formatINR(inst.localVendorCost)}</td>
+                    <td className="px-3 py-2 text-right"><CostValue amount={inst.localVendorCost} /></td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          <TablePagination page={currentDetailPage} pageSize={PAGE_SIZE} totalItems={detailInsts.length} onPageChange={setDetailPage} />
         </div>
       </div>
     );
@@ -126,8 +134,8 @@ export default function ExecutiveDashboard() {
                     <td className="px-3 py-2 font-medium text-blue-700">{c.client}</td>
                     <td className="px-3 py-2">{c.exams}</td><td className="px-3 py-2">{c.venues}</td>
                     <td className="px-3 py-2">{c.candidates.toLocaleString('en-IN')}</td>
-                    <td className="px-3 py-2">{formatINR(c.cost)}</td>
-                    <td className="px-3 py-2">{formatINR(c.perCandidate)}</td>
+                    <td className="px-3 py-2"><CostValue amount={c.cost} /></td>
+                    <td className="px-3 py-2"><CostValue amount={c.perCandidate} /></td>
                   </tr>
                 ))}
             </tbody>
@@ -150,8 +158,8 @@ export default function ExecutiveDashboard() {
                     <td className="px-3 py-2 font-medium">{e.exam}</td>
                     <td className="px-3 py-2">{e.clients}</td><td className="px-3 py-2">{e.venues}</td>
                     <td className="px-3 py-2">{e.candidates.toLocaleString('en-IN')}</td>
-                    <td className="px-3 py-2">{formatINR(e.cost)}</td>
-                    <td className="px-3 py-2">{formatINR(e.perCandidate)}</td>
+                    <td className="px-3 py-2"><CostValue amount={e.cost} /></td>
+                    <td className="px-3 py-2"><CostValue amount={e.perCandidate} /></td>
                   </tr>
                 ))}
             </tbody>
@@ -212,7 +220,7 @@ function DrillDownTable({ data, filtered, drill, setDrill }: {
             <td className="px-3 py-2 text-blue-700 font-medium">{r.label}</td>
             <td className="px-3 py-2">{r.venues}</td>
             <td className="px-3 py-2">{r.candidates.toLocaleString('en-IN')}</td>
-            <td className="px-3 py-2">{formatINR(r.cost)}</td>
+            <td className="px-3 py-2"><CostValue amount={r.cost} /></td>
           </tr>
         ))}
       </tbody>

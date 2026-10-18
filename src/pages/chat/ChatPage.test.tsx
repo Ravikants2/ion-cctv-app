@@ -7,7 +7,7 @@ import ChatPage, { AssistantAnswer } from './ChatPage';
 
 vi.mock('../../context/AuthContext', () => ({ useAuth: vi.fn() }));
 vi.mock('../../utils/chat', () => ({
-  buildChatContext: vi.fn(() => ({ requirements: [], vendors: [], installations: [], examDates: [] })),
+  buildChatContext: vi.fn(() => ({ summary: '{}', requirements: [], vendors: [], installations: [], examDates: [] })),
   sendChatMessage: vi.fn(),
 }));
 
@@ -71,7 +71,7 @@ describe('ChatPage', () => {
     expect(sendChatMessage).toHaveBeenNthCalledWith(
       1,
       'How many installations?',
-      { requirements: [], vendors: [], installations: [], examDates: [] },
+      { summary: '{}', requirements: [], vendors: [], installations: [], examDates: [] },
       []
     );
 
@@ -81,7 +81,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(sendChatMessage).toHaveBeenNthCalledWith(
       2,
       'What about North?',
-      { requirements: [], vendors: [], installations: [], examDates: [] },
+      { summary: '{}', requirements: [], vendors: [], installations: [], examDates: [] },
       [
         { role: 'user', text: 'How many installations?' },
         { role: 'model', text: 'There are two installations.' },

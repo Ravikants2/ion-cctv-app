@@ -6,6 +6,7 @@ import {
   getUniqueExamDays,
   safeDiv,
   formatINR,
+  formatINRInWords,
 } from '../utils/calculations';
 import type { InstallationRecord, ExamDateDetail, RequirementMaster, VendorMaster, DashboardFilters } from '../types';
 
@@ -62,6 +63,14 @@ describe('formatINR', () => {
   it('formats Indian currency', () => {
     expect(formatINR(10000)).toContain('₹');
     expect(formatINR(0)).toBe('₹0');
+  });
+});
+
+describe('formatINRInWords', () => {
+  it('spells out Indian number groups for hover descriptions', () => {
+    expect(formatINRInWords(12_345_678)).toBe('one crore twenty three lakh forty five thousand six hundred seventy eight rupees');
+    expect(formatINRInWords(0)).toBe('Zero rupees');
+    expect(formatINRInWords(10.5)).toBe('ten rupees and fifty paise');
   });
 });
 

@@ -4,14 +4,19 @@ import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
 import { KPICard, Badge } from '../../components/ui/index';
-import { applyDashboardFilters, getInstallationStats, formatINR } from '../../utils/calculations';
+import { applyDashboardFilters, getInstallationStats } from '../../utils/calculations';
 import { CheckCircle, Clock, FileText, AlertTriangle, Pencil } from 'lucide-react';
+import { CostValue } from '../../components/ui/CostValue';
+import { TablePagination } from '../../components/ui/TablePagination';
+
+const PAGE_SIZE = 25;
 
 export default function OperationsDashboard() {
   const { data } = useAuth();
   const { filters } = useFilters();
   const navigate = useNavigate();
   const [kpiDetail, setKpiDetail] = useState<string | null>(null);
+  const [detailPage, setDetailPage] = useState(1);
 
   const filtered = applyDashboardFilters(data.installations, data.requirements, data.examDates, filters);
   const allReqs = data.requirements.filter(r => {
@@ -52,6 +57,9 @@ export default function OperationsDashboard() {
     const items = kpiDetail === 'pending'
       ? pending
       : attentionItems.map(i => data.requirements.find(r => r.id === i.requirementId)!).filter(Boolean);
+    const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    const currentPage = Math.min(detailPage, pageCount);
+    const pageItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
     return (
       <div>
         <GlobalFilters />
@@ -65,7 +73,7 @@ export default function OperationsDashboard() {
               ))}
             </tr></thead>
             <tbody>
-              {items.map(req => (
+              {pageItems.map(req => (
                 <tr key={req.id} className="border-t hover:bg-gray-50">
                   <td className="px-3 py-2">{req.clientName}</td>
                   <td className="px-3 py-2">{req.examName}</td>
@@ -85,6 +93,7 @@ export default function OperationsDashboard() {
               ))}
             </tbody>
           </table>
+          <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={items.length} onPageChange={setDetailPage} />
         </div>
       </div>
     );
@@ -121,8 +130,8 @@ export default function OperationsDashboard() {
                   <td className="px-3 py-2">{s.venues}</td>
                   <td className="px-3 py-2">{s.candidates.toLocaleString('en-IN')}</td>
                   <td className="px-3 py-2">{s.cameras}</td>
-                  <td className="px-3 py-2">{formatINR(s.cost)}</td>
-                  <td className="px-3 py-2">{formatINR(s.perCandidate)}</td>
+                  <td className="px-3 py-2"><CostValue amount={s.cost} /></td>
+                  <td className="px-3 py-2"><CostValue amount={s.perCandidate} /></td>
                 </tr>
               );
             })}

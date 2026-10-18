@@ -160,7 +160,7 @@ export default function ChatPage() {
     setIsSending(true);
 
     try {
-      const answer = await sendChatMessage(question, buildChatContext(data), history);
+      const answer = await sendChatMessage(question, buildChatContext(data, question), history);
       setMessages(previous => [...previous, { role: 'model', text: answer }]);
     } catch (cause) {
       setMessages(previous => previous.slice(0, -1));

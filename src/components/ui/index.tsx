@@ -48,7 +48,7 @@ export function Alert({ type, children, onClose }: AlertProps) {
 
 interface KPICardProps {
   title: string;
-  value: string | number;
+  value: React.ReactNode;
   subtitle?: string;
   onClick?: () => void;
   icon?: React.ReactNode;

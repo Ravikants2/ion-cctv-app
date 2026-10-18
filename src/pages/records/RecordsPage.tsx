@@ -5,8 +5,12 @@ import { Button } from '../../components/ui/Button';
 import { Input, Select } from '../../components/ui/FormFields';
 import { exportRecordsToExcel } from '../../utils/excel';
 import { printRecordsPDF } from '../../utils/pdf';
-import { getInstallationStats, formatINR } from '../../utils/calculations';
+import { getInstallationStats } from '../../utils/calculations';
 import { Download, Printer, Eye, Pencil } from 'lucide-react';
+import { TablePagination } from '../../components/ui/TablePagination';
+import { CostValue } from '../../components/ui/CostValue';
+
+const PAGE_SIZE = 25;
 
 export default function RecordsPage() {
   const { data, can } = useAuth();
@@ -16,6 +20,7 @@ export default function RecordsPage() {
   const [filterClient, setFilterClient] = useState('');
   const [filterExam, setFilterExam] = useState('');
   const [filterZone, setFilterZone] = useState('');
+  const [page, setPage] = useState(1);
 
   const clients = [...new Set(data.requirements.map(r => r.clientName))].sort();
   const exams = [...new Set(data.requirements.filter(r => !filterClient || r.clientName === filterClient).map(r => r.examName))].sort();
@@ -35,6 +40,9 @@ export default function RecordsPage() {
     }
     return true;
   });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const handleViewQuotation = (quotationFileId: string) => {
     const q = data.quotations.find(q => q.id === quotationFileId);
@@ -73,16 +81,16 @@ export default function RecordsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-4">
-        <Input type="date" label="Start Date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-36" />
-        <Input type="date" label="End Date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-36" />
-        <Select label="Client" value={filterClient} onChange={e => { setFilterClient(e.target.value); setFilterExam(''); }}
+        <Input type="date" label="Start Date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} className="w-36" />
+        <Input type="date" label="End Date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} className="w-36" />
+        <Select label="Client" value={filterClient} onChange={e => { setFilterClient(e.target.value); setFilterExam(''); setPage(1); }}
           options={clients.map(c => ({ value: c, label: c }))} placeholder="All Clients" className="w-44" />
-        <Select label="Exam" value={filterExam} onChange={e => setFilterExam(e.target.value)}
+        <Select label="Exam" value={filterExam} onChange={e => { setFilterExam(e.target.value); setPage(1); }}
           options={exams.map(e => ({ value: e, label: e }))} placeholder="All Exams" className="w-44" />
-        <Select label="Zone" value={filterZone} onChange={e => setFilterZone(e.target.value)}
+        <Select label="Zone" value={filterZone} onChange={e => { setFilterZone(e.target.value); setPage(1); }}
           options={zones.map(z => ({ value: z, label: z }))} placeholder="All Zones" className="w-36" />
         {(filterClient || filterExam || filterZone || startDate || endDate) && (
-          <Button variant="ghost" size="sm" className="self-end" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setStartDate(''); setEndDate(''); }}>Clear</Button>
+          <Button variant="ghost" size="sm" className="self-end" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setStartDate(''); setEndDate(''); setPage(1); }}>Clear</Button>
         )}
       </div>
 
@@ -98,13 +106,13 @@ export default function RecordsPage() {
           <tbody>
             {filtered.length === 0 ? (
               <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No records found.</td></tr>
-            ) : filtered.map((inst, idx) => {
+            ) : pageRows.map((inst, idx) => {
               const req = data.requirements.find(r => r.id === inst.requirementId);
               const vendor = data.vendors.find(v => v.id === inst.vendorId);
               const { examDays, totalCandidates } = getInstallationStats(inst, data.examDates);
               return (
                 <tr key={inst.id} className="border-t hover:bg-gray-50">
-                  <td className="px-3 py-3 text-gray-500">{idx + 1}</td>
+                  <td className="px-3 py-3 text-gray-500">{(currentPage - 1) * PAGE_SIZE + idx + 1}</td>
                   <td className="px-3 py-3">{req?.zone}</td>
                   <td className="px-3 py-3">{req?.state}</td>
                   <td className="px-3 py-3">{req?.city}</td>
@@ -113,7 +121,7 @@ export default function RecordsPage() {
                   <td className="px-3 py-3 text-center">{examDays}</td>
                   <td className="px-3 py-3 text-right">{totalCandidates.toLocaleString('en-IN')}</td>
                   <td className="px-3 py-3">{vendor?.vendorName}</td>
-                  <td className="px-3 py-3 text-right font-medium">{formatINR(inst.localVendorCost)}</td>
+                  <td className="px-3 py-3 text-right font-medium"><CostValue amount={inst.localVendorCost} /></td>
                   <td className="px-3 py-3">
                     {inst.quotationFileId ? (
                       <Button variant="ghost" size="sm" onClick={() => handleViewQuotation(inst.quotationFileId!)}>
@@ -133,7 +141,7 @@ export default function RecordsPage() {
             })}
           </tbody>
         </table>
-        <div className="px-4 py-2 text-xs text-gray-500 border-t">{filtered.length} of {data.installations.length} records</div>
+        <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setPage} />
       </div>
     </div>
   );

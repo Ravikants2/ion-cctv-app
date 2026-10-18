@@ -7,6 +7,9 @@ import { Alert, Badge, ConfirmDialog, Modal } from '../../components/ui/index';
 import { downloadTemplate, parseRequirementFile } from '../../utils/excel';
 import type { RequirementMaster } from '../../types';
 import { Download, Upload, Trash2, Plus } from 'lucide-react';
+import { TablePagination } from '../../components/ui/TablePagination';
+
+const PAGE_SIZE = 25;
 
 interface PreviewRow extends Partial<RequirementMaster> {
   status: 'NEW' | 'UPDATE' | 'ERROR';
@@ -25,6 +28,7 @@ export default function RequirementsPage() {
   const [addModal, setAddModal] = useState(false);
   const [form, setForm] = useState<Partial<RequirementMaster>>({});
   const [formError, setFormError] = useState('');
+  const [page, setPage] = useState(1);
 
   const clients = [...new Set(data.requirements.map(r => r.clientName))].sort();
   const exams = [...new Set(data.requirements.filter(r => !filterClient || r.clientName === filterClient).map(r => r.examName))].sort();
@@ -40,6 +44,9 @@ export default function RequirementsPage() {
     }
     return true;
   });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -149,13 +156,13 @@ export default function RequirementsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-4">
-        <Input placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} className="w-48" />
-        <Select value={filterClient} onChange={e => { setFilterClient(e.target.value); setFilterExam(''); }}
+        <Input placeholder="Search…" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="w-48" />
+        <Select value={filterClient} onChange={e => { setFilterClient(e.target.value); setFilterExam(''); setPage(1); }}
           options={clients.map(c => ({ value: c, label: c }))} placeholder="All Clients" className="w-44" />
-        <Select value={filterExam} onChange={e => setFilterExam(e.target.value)}
+        <Select value={filterExam} onChange={e => { setFilterExam(e.target.value); setPage(1); }}
           options={exams.map(e => ({ value: e, label: e }))} placeholder="All Exams" className="w-44" />
         {(filterClient || filterExam || search) && (
-          <Button variant="ghost" size="sm" onClick={() => { setFilterClient(''); setFilterExam(''); setSearch(''); }}>Clear</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setFilterClient(''); setFilterExam(''); setSearch(''); setPage(1); }}>Clear</Button>
         )}
       </div>
 
@@ -203,7 +210,7 @@ export default function RequirementsPage() {
           <tbody>
             {filtered.length === 0 ? (
               <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No requirements found.</td></tr>
-            ) : filtered.map(r => (
+            ) : pageRows.map(r => (
               <tr key={r.id} className="border-t hover:bg-gray-50">
                 <td className="px-4 py-3">{r.clientName}</td>
                 <td className="px-4 py-3">{r.examName}</td>
@@ -223,7 +230,7 @@ export default function RequirementsPage() {
             ))}
           </tbody>
         </table>
-        <div className="px-4 py-2 text-xs text-gray-500 border-t">{filtered.length} of {data.requirements.length} records</div>
+        <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setPage} />
       </div>
 
       <ConfirmDialog

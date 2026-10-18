@@ -3,14 +3,25 @@ import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
 import { KPICard } from '../../components/ui/index';
-import { applyDashboardFilters, getDashboardKPIs, formatINR, getInstallationStats, safeDiv } from '../../utils/calculations';
+import { applyDashboardFilters, getDashboardKPIs, getInstallationStats, safeDiv } from '../../utils/calculations';
 import { DollarSign, Building2, Camera, Users, TrendingUp } from 'lucide-react';
+import { CostValue } from '../../components/ui/CostValue';
+import { TablePagination } from '../../components/ui/TablePagination';
+
+const PAGE_SIZE = 10;
+const TOP_LIST_PAGE_SIZE = 5;
 
 export default function FinancialDashboard() {
   const { data } = useAuth();
   const { filters } = useFilters();
   const [kpiDetail, setKpiDetail] = useState<string | null>(null);
   const [drillZone, setDrillZone] = useState<string | null>(null);
+  const [detailPage, setDetailPage] = useState(1);
+  const [variancePage, setVariancePage] = useState(1);
+  const [zonePage, setZonePage] = useState(1);
+  const [zoneSummaryPage, setZoneSummaryPage] = useState(1);
+  const [topCostPage, setTopCostPage] = useState(1);
+  const [topCandidatePage, setTopCandidatePage] = useState(1);
 
   const filtered = applyDashboardFilters(data.installations, data.requirements, data.examDates, filters);
   const kpis = getDashboardKPIs(filtered, data.requirements, data.vendors, data.examDates);
@@ -55,8 +66,35 @@ export default function FinancialDashboard() {
     const cities = [...new Set(reqs.filter(r => insts.some(i => i.requirementId === r.id)).map(r => r.city))].length;
     return { zone, venues: insts.length, candidates, cost, perCandidate: safeDiv(cost, candidates), cities };
   }).filter(z => z.venues > 0);
+  const zoneInsts = drillZone
+    ? filtered.filter(i => data.requirements.find(r => r.id === i.requirementId)?.zone === drillZone)
+    : [];
+  const variancePageCount = Math.max(1, Math.ceil(variance.length / PAGE_SIZE));
+  const currentVariancePage = Math.min(variancePage, variancePageCount);
+  const varianceRows = variance.slice((currentVariancePage - 1) * PAGE_SIZE, currentVariancePage * PAGE_SIZE);
+  const zonePageCount = Math.max(1, Math.ceil(zoneInsts.length / PAGE_SIZE));
+  const currentZonePage = Math.min(zonePage, zonePageCount);
+  const zoneRows = zoneInsts.slice((currentZonePage - 1) * PAGE_SIZE, currentZonePage * PAGE_SIZE);
+  const currentZoneSummaryPage = Math.min(zoneSummaryPage, Math.max(1, Math.ceil(zoneStats.length / PAGE_SIZE)));
+  const zoneSummaryRows = zoneStats.slice(
+    (currentZoneSummaryPage - 1) * PAGE_SIZE,
+    currentZoneSummaryPage * PAGE_SIZE
+  );
+  const currentTopCostPage = Math.min(topCostPage, Math.max(1, Math.ceil(top10Cost.length / TOP_LIST_PAGE_SIZE)));
+  const topCostRows = top10Cost.slice(
+    (currentTopCostPage - 1) * TOP_LIST_PAGE_SIZE,
+    currentTopCostPage * TOP_LIST_PAGE_SIZE
+  );
+  const currentTopCandidatePage = Math.min(topCandidatePage, Math.max(1, Math.ceil(top10PerCandidate.length / TOP_LIST_PAGE_SIZE)));
+  const topCandidateRows = top10PerCandidate.slice(
+    (currentTopCandidatePage - 1) * TOP_LIST_PAGE_SIZE,
+    currentTopCandidatePage * TOP_LIST_PAGE_SIZE
+  );
 
   if (kpiDetail) {
+    const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const currentPage = Math.min(detailPage, pageCount);
+    const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
     return (
       <div>
         <GlobalFilters />
@@ -70,7 +108,7 @@ export default function FinancialDashboard() {
               ))}
             </tr></thead>
             <tbody>
-              {filtered.map(inst => {
+              {pageRows.map(inst => {
                 const req = data.requirements.find(r => r.id === inst.requirementId);
                 const { totalCandidates } = getInstallationStats(inst, data.examDates);
                 return (
@@ -79,13 +117,14 @@ export default function FinancialDashboard() {
                     <td className="px-3 py-2 font-mono text-xs">{req?.tcCode}</td>
                     <td className="px-3 py-2">{req?.tcName}</td>
                     <td className="px-3 py-2 text-right">{totalCandidates.toLocaleString('en-IN')}</td>
-                    <td className="px-3 py-2 text-right">{formatINR(inst.localVendorCost)}</td>
-                    <td className="px-3 py-2 text-right">{formatINR(safeDiv(inst.localVendorCost, totalCandidates))}</td>
+                    <td className="px-3 py-2 text-right"><CostValue amount={inst.localVendorCost} /></td>
+                    <td className="px-3 py-2 text-right"><CostValue amount={safeDiv(inst.localVendorCost, totalCandidates)} /></td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setDetailPage} />
         </div>
       </div>
     );
@@ -98,11 +137,11 @@ export default function FinancialDashboard() {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         {[
-          { key: 'totalCost', title: 'Total Cost', value: formatINR(kpis.totalCost), icon: <DollarSign size={20} />, color: 'red' },
-          { key: 'costPerVenue', title: 'Cost per Venue', value: formatINR(kpis.costPerVenue), icon: <Building2 size={20} />, color: 'blue' },
-          { key: 'costPerCamera', title: 'Cost per Camera', value: formatINR(kpis.costPerCamera), icon: <Camera size={20} />, color: 'orange' },
+          { key: 'totalCost', title: 'Total Cost', value: <CostValue amount={kpis.totalCost} />, icon: <DollarSign size={20} />, color: 'red' },
+          { key: 'costPerVenue', title: 'Cost per Venue', value: <CostValue amount={kpis.costPerVenue} />, icon: <Building2 size={20} />, color: 'blue' },
+          { key: 'costPerCamera', title: 'Cost per Camera', value: <CostValue amount={kpis.costPerCamera} />, icon: <Camera size={20} />, color: 'orange' },
           { key: 'candidatesPerCamera', title: 'Candidates/Camera', value: kpis.candidatesPerCamera.toFixed(1), icon: <Users size={20} />, color: 'purple' },
-          { key: 'perCandidateCost', title: 'Per Candidate Cost', value: formatINR(kpis.perCandidateCost), icon: <TrendingUp size={20} />, color: 'teal' },
+          { key: 'perCandidateCost', title: 'Per Candidate Cost', value: <CostValue amount={kpis.perCandidateCost} />, icon: <TrendingUp size={20} />, color: 'teal' },
           { key: 'venues', title: 'Venues', value: kpis.venues, icon: <Building2 size={20} />, color: 'green' },
         ].map(card => (
           <KPICard key={card.key} title={card.title} value={card.value} icon={card.icon} color={card.color} onClick={() => setKpiDetail(card.key)} />
@@ -117,15 +156,21 @@ export default function FinancialDashboard() {
             <thead><tr className="bg-gray-50"><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Code</th><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Name</th><th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Cost</th></tr></thead>
             <tbody>
               {top10Cost.length === 0 ? <tr><td colSpan={3} className="px-4 py-4 text-center text-gray-400">No data</td></tr>
-                : top10Cost.map(({ inst, req }) => (
+                : topCostRows.map(({ inst, req }) => (
                   <tr key={inst.id} className="border-t hover:bg-gray-50">
                     <td className="px-3 py-2 font-mono text-xs">{req?.tcCode}</td>
                     <td className="px-3 py-2">{req?.tcName}</td>
-                    <td className="px-3 py-2 text-right font-medium">{formatINR(inst.localVendorCost)}</td>
+                    <td className="px-3 py-2 text-right font-medium"><CostValue amount={inst.localVendorCost} /></td>
                   </tr>
                 ))}
             </tbody>
           </table>
+          <TablePagination
+            page={currentTopCostPage}
+            pageSize={TOP_LIST_PAGE_SIZE}
+            totalItems={top10Cost.length}
+            onPageChange={setTopCostPage}
+          />
         </div>
 
         {/* Top 10 Per Candidate */}
@@ -135,15 +180,21 @@ export default function FinancialDashboard() {
             <thead><tr className="bg-gray-50"><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Code</th><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Name</th><th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Per Candidate</th></tr></thead>
             <tbody>
               {top10PerCandidate.length === 0 ? <tr><td colSpan={3} className="px-4 py-4 text-center text-gray-400">No data</td></tr>
-                : top10PerCandidate.map(({ inst, req, perCandidate }) => (
+                : topCandidateRows.map(({ inst, req, perCandidate }) => (
                   <tr key={inst.id} className="border-t hover:bg-gray-50">
                     <td className="px-3 py-2 font-mono text-xs">{req?.tcCode}</td>
                     <td className="px-3 py-2">{req?.tcName}</td>
-                    <td className="px-3 py-2 text-right font-medium">{formatINR(perCandidate)}</td>
+                    <td className="px-3 py-2 text-right font-medium"><CostValue amount={perCandidate} /></td>
                   </tr>
                 ))}
             </tbody>
           </table>
+          <TablePagination
+            page={currentTopCandidatePage}
+            pageSize={TOP_LIST_PAGE_SIZE}
+            totalItems={top10PerCandidate.length}
+            onPageChange={setTopCandidatePage}
+          />
         </div>
       </div>
 
@@ -158,17 +209,23 @@ export default function FinancialDashboard() {
               ))}
             </tr></thead>
             <tbody>
-              {variance.map(({ inst, req, variance: v }) => (
+              {varianceRows.map(({ inst, req, variance: v }) => (
                 <tr key={inst.id} className="border-t hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono text-xs">{req?.tcCode}</td>
                   <td className="px-3 py-2">{req?.tcName}</td>
-                  <td className="px-3 py-2 text-right">{formatINR(inst.localVendorCost)}</td>
-                  <td className="px-3 py-2 text-right">{formatINR(inst.minimumCost || 0)}</td>
-                  <td className={`px-3 py-2 text-right font-medium ${v > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatINR(v)}</td>
+                  <td className="px-3 py-2 text-right"><CostValue amount={inst.localVendorCost} /></td>
+                  <td className="px-3 py-2 text-right"><CostValue amount={inst.minimumCost || 0} /></td>
+                  <td className={`px-3 py-2 text-right font-medium ${v > 0 ? 'text-red-600' : 'text-green-600'}`}><CostValue amount={v} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <TablePagination
+            page={currentVariancePage}
+            pageSize={PAGE_SIZE}
+            totalItems={variance.length}
+            onPageChange={setVariancePage}
+          />
         </div>
       )}
 
@@ -183,18 +240,24 @@ export default function FinancialDashboard() {
           </tr></thead>
           <tbody>
             {zoneStats.length === 0 ? <tr><td colSpan={6} className="px-4 py-4 text-center text-gray-400">No data</td></tr>
-              : zoneStats.map(z => (
+              : zoneSummaryRows.map(z => (
                 <tr key={z.zone} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => setDrillZone(z.zone)}>
                   <td className="px-3 py-2 font-medium text-blue-700">{z.zone}</td>
                   <td className="px-3 py-2">{z.venues}</td>
                   <td className="px-3 py-2">{z.cities}</td>
                   <td className="px-3 py-2">{z.candidates.toLocaleString('en-IN')}</td>
-                  <td className="px-3 py-2">{formatINR(z.cost)}</td>
-                  <td className="px-3 py-2">{formatINR(z.perCandidate)}</td>
+                  <td className="px-3 py-2"><CostValue amount={z.cost} /></td>
+                  <td className="px-3 py-2"><CostValue amount={z.perCandidate} /></td>
                 </tr>
               ))}
           </tbody>
         </table>
+        <TablePagination
+          page={currentZoneSummaryPage}
+          pageSize={PAGE_SIZE}
+          totalItems={zoneStats.length}
+          onPageChange={setZoneSummaryPage}
+        />
       </div>
 
       {drillZone && (
@@ -210,7 +273,7 @@ export default function FinancialDashboard() {
               ))}
             </tr></thead>
             <tbody>
-              {filtered.filter(i => data.requirements.find(r => r.id === i.requirementId)?.zone === drillZone).map(inst => {
+              {zoneRows.map(inst => {
                 const req = data.requirements.find(r => r.id === inst.requirementId);
                 const { totalCandidates } = getInstallationStats(inst, data.examDates);
                 return (
@@ -218,13 +281,19 @@ export default function FinancialDashboard() {
                     <td className="px-3 py-2">{req?.state}</td><td className="px-3 py-2">{req?.city}</td>
                     <td className="px-3 py-2 font-mono text-xs">{req?.tcCode}</td><td className="px-3 py-2">{req?.tcName}</td>
                     <td className="px-3 py-2 text-right">{totalCandidates.toLocaleString('en-IN')}</td>
-                    <td className="px-3 py-2 text-right">{formatINR(inst.localVendorCost)}</td>
-                    <td className="px-3 py-2 text-right">{formatINR(safeDiv(inst.localVendorCost, totalCandidates))}</td>
+                    <td className="px-3 py-2 text-right"><CostValue amount={inst.localVendorCost} /></td>
+                    <td className="px-3 py-2 text-right"><CostValue amount={safeDiv(inst.localVendorCost, totalCandidates)} /></td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          <TablePagination
+            page={currentZonePage}
+            pageSize={PAGE_SIZE}
+            totalItems={zoneInsts.length}
+            onPageChange={setZonePage}
+          />
         </div>
       )}
     </div>

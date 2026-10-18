@@ -9,23 +9,26 @@ const env = {
   GEMINI_FALLBACK_MODEL: 'gemini-3.8-flash',
 };
 
-function createRequest() {
+function createRequest(overrides = {}) {
+  const body = {
+    message: 'List all installations.',
+    history: [],
+    context: {
+      summary: '{}',
+      requirements: [],
+      vendors: [],
+      installations: [],
+      examDates: [],
+    },
+    ...overrides,
+  };
   return new Request('https://chat.example/api/chat', {
     method: 'POST',
     headers: {
       Origin: 'https://ravikants2.github.io',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      message: 'List all costs and totals.',
-      history: [],
-      context: {
-        requirements: [],
-        vendors: [],
-        installations: [],
-        examDates: [],
-      },
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -43,6 +46,40 @@ afterEach(() => {
 });
 
 describe('Gemini response completion', () => {
+  it('uses the summary and flags omitted rows instead of rejecting oversized details', async () => {
+    const installations = Array.from({ length: 1_000 }, (_, index) => ({
+      id: `installation-${index}`,
+      requirementId: `requirement-${index}`,
+      installationType: 'Full Vendor',
+      vendorId: 'vendor-1',
+      storageType: 'Storage '.repeat(40),
+      storageUnit: 'GB',
+      updatedAt: '2026-01-01',
+      cameraCount: 10,
+      storageQuantity: 10,
+      storageSize: 10,
+      localVendorCost: 1000,
+      minimumCost: 900,
+      proxyProvided: true,
+      internetProvided: true,
+      storageProvided: false,
+    }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+      const sentBody = JSON.parse(String(options?.body));
+      expect(sentBody.contents.at(-1).parts[0].text).toContain('"detailsOmitted":true');
+      expect(sentBody.contents.at(-1).parts[0].text).not.toContain('The loaded data is too large');
+      return geminiResponse('The data is large; narrow by zone.');
+    });
+
+    const response = await worker.fetch(createRequest({
+      context: { summary: '{"installations":1000}', requirements: [], vendors: [], installations, examDates: [] },
+    }), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ answer: 'The data is large; narrow by zone.' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('allows longer answers and returns a complete answer', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(geminiResponse('Complete table and totals.'));
@@ -53,7 +90,7 @@ describe('Gemini response completion', () => {
     await expect(response.json()).resolves.toEqual({ answer: 'Complete table and totals.' });
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(requestBody.generationConfig.maxOutputTokens).toBe(4_096);
-    expect(requestBody.systemInstruction.parts[0].text).toContain('verify that the answer includes all requested rows and totals');
+    expect(requestBody.systemInstruction.parts[0].text).toContain('Keep answers concise by default');
     expect(fetchMock.mock.calls[0][0]).toContain('/models/gemini-3.1-flash-lite:generateContent');
   });
 

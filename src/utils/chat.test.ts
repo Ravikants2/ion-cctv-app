@@ -41,8 +41,22 @@ const appData: AppData = {
 };
 
 describe('buildChatContext', () => {
-  it('includes operational data and excludes accounts, audit logs, and quotation contents', () => {
-    const serialized = JSON.stringify(buildChatContext(appData));
+  it('uses compact summaries for quick questions', () => {
+    const context = buildChatContext(appData, 'How many installations?');
+    const serialized = JSON.stringify(context);
+
+    expect(context.installations).toEqual([]);
+    expect(context.summary).toContain('"installations":1');
+    expect(context.summary).toContain('"cost":1000');
+    expect(serialized).not.toContain('private@example.com');
+    expect(serialized).not.toContain('secret-hash');
+    expect(serialized).not.toContain('quotation-1');
+    expect(serialized).not.toContain('data:application/pdf');
+    expect(serialized).not.toContain('audit-1');
+  });
+
+  it('includes full operational details only when explicitly requested', () => {
+    const serialized = JSON.stringify(buildChatContext(appData, 'Show all installation details'));
 
     expect(serialized).toContain('Test Center');
     expect(serialized).toContain('Vendor');
@@ -52,6 +66,13 @@ describe('buildChatContext', () => {
     expect(serialized).not.toContain('quotation-1');
     expect(serialized).not.toContain('data:application/pdf');
     expect(serialized).not.toContain('audit-1');
+  });
+
+  it('keeps grouped requests compact even when phrased as a list', () => {
+    const context = buildChatContext(appData, 'List installations by zone');
+
+    expect(context.installations).toEqual([]);
+    expect(context.summary).toContain('installationsByZone');
   });
 });
 
@@ -82,6 +103,42 @@ describe('sendChatMessage', () => {
     expect(body.message).toBe('Count installations');
     expect(body.history).toEqual([{ role: 'user', text: 'Hello' }]);
     expect(JSON.stringify(body.context)).not.toContain('secret-hash');
+
+    fetchMock.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('turns oversized detail requests into actionable concise guidance', async () => {
+    vi.stubEnv('VITE_GEMINI_CHAT_ENDPOINT', 'https://chat.example/api/chat');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ error: 'The loaded data is too large for one chat request.' }),
+      { status: 413, headers: { 'Content-Type': 'application/json' } }
+    ));
+
+    await expect(sendChatMessage('Show all installation details', buildChatContext(appData, 'Show all installation details'), []))
+      .resolves.toContain('Narrow your request by zone, client, exam, or date');
+
+    vi.unstubAllEnvs();
+  });
+
+  it('shrinks oversized detail requests before sending them to the worker', async () => {
+    vi.stubEnv('VITE_GEMINI_CHAT_ENDPOINT', 'https://chat.example/api/chat');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ answer: 'Here is the requested summary.' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    ));
+    const context = buildChatContext(appData, 'Show all installation details');
+    const installation = context.installations[0];
+    context.installations = Array.from({ length: 5_000 }, () => installation);
+
+    await expect(sendChatMessage('Show all installation details', context, [])).resolves.toBe(
+      'Here is the requested summary.'
+    );
+
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(new TextEncoder().encode(String(fetchMock.mock.calls[0][1]?.body)).byteLength).toBeLessThan(700_000);
+    expect(request.context.detailsOmitted).toBe(true);
+    expect(request.context.installations.length).toBeLessThan(5_000);
 
     fetchMock.mockRestore();
     vi.unstubAllEnvs();

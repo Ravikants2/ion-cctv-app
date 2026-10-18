@@ -5,6 +5,57 @@ export function formatINR(amount: number): string {
   return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function numberToIndianWords(value: number): string {
+  const ones = [
+    '', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+    'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+    'seventeen', 'eighteen', 'nineteen',
+  ];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const words: string[] = [];
+
+  if (value >= 100) {
+    words.push(`${ones[Math.floor(value / 100)]} hundred`);
+    value %= 100;
+  }
+  if (value >= 20) {
+    words.push(tens[Math.floor(value / 10)]);
+    value %= 10;
+  }
+  if (value > 0) words.push(ones[value]);
+  return words.join(' ');
+}
+
+export function formatINRInWords(amount: number): string {
+  if (!Number.isFinite(amount)) return 'Amount unavailable';
+  if (amount === 0) return 'Zero rupees';
+
+  let remaining = Math.floor(Math.abs(amount));
+  const parts: string[] = [];
+  const groups: Array<[number, string]> = [
+    [1_000_000_000_000_000, 'padma'],
+    [10_000_000_000_000, 'neel'],
+    [100_000_000_000, 'kharab'],
+    [1_000_000_000, 'arab'],
+    [10_000_000, 'crore'],
+    [100_000, 'lakh'],
+    [1_000, 'thousand'],
+    [1, ''],
+  ];
+
+  for (const [divisor, label] of groups) {
+    const group = Math.floor(remaining / divisor);
+    if (group > 0) {
+      parts.push(`${numberToIndianWords(group)}${label ? ` ${label}` : ''}`);
+      remaining %= divisor;
+    }
+  }
+
+  const paise = Math.round((Math.abs(amount) % 1) * 100);
+  const sign = amount < 0 ? 'minus ' : '';
+  return `${sign}${parts.join(' ')} rupees${paise ? ` and ${numberToIndianWords(paise)} paise` : ''}`;
+}
+
 export function safeDiv(numerator: number, denominator: number): number {
   if (!denominator || denominator === 0) return 0;
   return numerator / denominator;
