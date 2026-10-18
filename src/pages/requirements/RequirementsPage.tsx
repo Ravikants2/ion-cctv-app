@@ -22,6 +22,9 @@ export default function RequirementsPage() {
   const [search, setSearch] = useState('');
   const [filterClient, setFilterClient] = useState('');
   const [filterExam, setFilterExam] = useState('');
+  const [filterZone, setFilterZone] = useState('');
+  const [filterState, setFilterState] = useState('');
+  const [filterCity, setFilterCity] = useState('');
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
@@ -32,15 +35,25 @@ export default function RequirementsPage() {
 
   const clients = [...new Set(data.requirements.map(r => r.clientName))].sort();
   const exams = [...new Set(data.requirements.filter(r => !filterClient || r.clientName === filterClient).map(r => r.examName))].sort();
+  const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
+  const states = [...new Set(data.requirements
+    .filter(r => !filterZone || r.zone === filterZone)
+    .map(r => r.state))].sort();
+  const cities = [...new Set(data.requirements
+    .filter(r => (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState))
+    .map(r => r.city))].sort();
 
   const filtered = data.requirements.filter(r => {
     if (filterClient && r.clientName !== filterClient) return false;
     if (filterExam && r.examName !== filterExam) return false;
+    if (filterZone && r.zone !== filterZone) return false;
+    if (filterState && r.state !== filterState) return false;
+    if (filterCity && r.city !== filterCity) return false;
     if (search) {
       const s = search.toLowerCase();
       return r.tcCode.toLowerCase().includes(s) || r.tcName.toLowerCase().includes(s) ||
         r.clientName.toLowerCase().includes(s) || r.examName.toLowerCase().includes(s) ||
-        r.city.toLowerCase().includes(s) || r.zone.toLowerCase().includes(s);
+        r.city.toLowerCase().includes(s) || r.state.toLowerCase().includes(s) || r.zone.toLowerCase().includes(s);
     }
     return true;
   });
@@ -134,8 +147,12 @@ export default function RequirementsPage() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <h1 className="text-xl font-bold text-gray-900">Temp. CCTV Requirements</h1>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Location & exam setup</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">CCTV Requirements</h1>
+          <p className="mt-1 text-sm text-slate-500">Browse and manage exam-centre requirements.</p>
+        </div>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => downloadTemplate('requirement')}>
             <Download size={14} /> Template
@@ -155,15 +172,30 @@ export default function RequirementsPage() {
       {alert && <div className="mb-4"><Alert type={alert.type} onClose={() => setAlert(null)}>{alert.msg}</Alert></div>}
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-4">
-        <Input placeholder="Search…" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="w-48" />
-        <Select value={filterClient} onChange={e => { setFilterClient(e.target.value); setFilterExam(''); setPage(1); }}
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Filter requirements</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Narrow results by location, client, exam, or centre.</p>
+          </div>
+          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{filtered.length} results</span>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+        <Input aria-label="Search requirements" placeholder="Search requirements…" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="w-52" />
+        <Select label="Zone" value={filterZone} onChange={e => { setFilterZone(e.target.value); setFilterState(''); setFilterCity(''); setPage(1); }}
+          options={zones.map(zone => ({ value: zone, label: zone }))} placeholder="All zones" className="w-36" />
+        <Select label="State" value={filterState} onChange={e => { setFilterState(e.target.value); setFilterCity(''); setPage(1); }}
+          options={states.map(state => ({ value: state, label: state }))} placeholder="All states" className="w-40" />
+        <Select label="City" value={filterCity} onChange={e => { setFilterCity(e.target.value); setPage(1); }}
+          options={cities.map(city => ({ value: city, label: city }))} placeholder="All cities" className="w-40" />
+        <Select label="Client" value={filterClient} onChange={e => { setFilterClient(e.target.value); setFilterExam(''); setPage(1); }}
           options={clients.map(c => ({ value: c, label: c }))} placeholder="All Clients" className="w-44" />
-        <Select value={filterExam} onChange={e => { setFilterExam(e.target.value); setPage(1); }}
+        <Select label="Exam" value={filterExam} onChange={e => { setFilterExam(e.target.value); setPage(1); }}
           options={exams.map(e => ({ value: e, label: e }))} placeholder="All Exams" className="w-44" />
-        {(filterClient || filterExam || search) && (
-          <Button variant="ghost" size="sm" onClick={() => { setFilterClient(''); setFilterExam(''); setSearch(''); setPage(1); }}>Clear</Button>
+        {(filterClient || filterExam || filterZone || filterState || filterCity || search) && (
+          <Button variant="ghost" size="sm" className="mb-0.5" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setFilterState(''); setFilterCity(''); setSearch(''); setPage(1); }}>Clear filters</Button>
         )}
+        </div>
       </div>
 
       {/* Preview */}
@@ -200,18 +232,19 @@ export default function RequirementsPage() {
       )}
 
       {/* Table */}
-      <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="bg-gray-50 border-b">
             {['Client Name','Exam Name','Zone','State','City','TC Code','TC Name','Actions'].map(h => (
-              <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">{h}</th>
+              <th key={h} className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
             ))}
           </tr></thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No requirements found.</td></tr>
             ) : pageRows.map(r => (
-              <tr key={r.id} className="border-t hover:bg-gray-50">
+              <tr key={r.id} className="border-t border-slate-100 transition-colors hover:bg-blue-50/40">
                 <td className="px-4 py-3">{r.clientName}</td>
                 <td className="px-4 py-3">{r.examName}</td>
                 <td className="px-4 py-3">{r.zone}</td>
@@ -230,6 +263,7 @@ export default function RequirementsPage() {
             ))}
           </tbody>
         </table>
+        </div>
         <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setPage} />
       </div>
 

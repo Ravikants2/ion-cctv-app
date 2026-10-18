@@ -115,7 +115,10 @@ export default function FinancialDashboard() {
                   <tr key={inst.id} className="border-t hover:bg-gray-50">
                     <td className="px-3 py-2">{req?.zone}</td>
                     <td className="px-3 py-2 font-mono text-xs">{req?.tcCode}</td>
-                    <td className="px-3 py-2">{req?.tcName}</td>
+                    <td className="px-3 py-2">
+                      {req?.tcName}
+                      {req && <span className="ml-1 text-xs font-normal text-slate-500">({req.state}, {req.city})</span>}
+                    </td>
                     <td className="px-3 py-2 text-right">{totalCandidates.toLocaleString('en-IN')}</td>
                     <td className="px-3 py-2 text-right"><CostValue amount={inst.localVendorCost} /></td>
                     <td className="px-3 py-2 text-right"><CostValue amount={safeDiv(inst.localVendorCost, totalCandidates)} /></td>
@@ -159,7 +162,10 @@ export default function FinancialDashboard() {
                 : topCostRows.map(({ inst, req }) => (
                   <tr key={inst.id} className="border-t hover:bg-gray-50">
                     <td className="px-3 py-2 font-mono text-xs">{req?.tcCode}</td>
-                    <td className="px-3 py-2">{req?.tcName}</td>
+                    <td className="px-3 py-2">
+                      {req?.tcName}
+                      {req && <span className="ml-1 text-xs font-normal text-slate-500">({req.state}, {req.city})</span>}
+                    </td>
                     <td className="px-3 py-2 text-right font-medium"><CostValue amount={inst.localVendorCost} /></td>
                   </tr>
                 ))}

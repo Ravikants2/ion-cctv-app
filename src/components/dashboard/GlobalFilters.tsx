@@ -1,7 +1,6 @@
 import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { Input, Select } from '../ui/FormFields';
-import { Button } from '../ui/Button';
 
 export function GlobalFilters() {
   const { data } = useAuth();
@@ -16,8 +15,17 @@ export function GlobalFilters() {
   const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
 
   return (
-    <div className="bg-white border rounded-xl p-4 mb-6 shadow-sm">
-      <div className="flex flex-wrap gap-3 items-end">
+    <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-800">Dashboard filters</h2>
+          <p className="mt-0.5 text-xs text-slate-500">Update the reporting period and scope.</p>
+        </div>
+        <button type="button" onClick={clearFilters} className="text-xs font-medium text-blue-700 hover:text-blue-900">
+          Reset
+        </button>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
         <Input
           label="Start Date"
           type="date"
@@ -56,7 +64,6 @@ export function GlobalFilters() {
           placeholder="All Zones"
           className="w-36"
         />
-        <Button variant="secondary" size="sm" onClick={clearFilters}>Clear</Button>
       </div>
     </div>
   );

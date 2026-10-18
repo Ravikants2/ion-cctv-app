@@ -16,7 +16,7 @@ import OperationsDashboard from './pages/dashboard/OperationsDashboard';
 import VendorDashboard from './pages/dashboard/VendorDashboard';
 import ChatPage from './pages/chat/ChatPage';
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, viewerAllowed = false }: { children: React.ReactNode; viewerAllowed?: boolean }) {
   const { currentUser, syncStatus } = useAuth();
   if (syncStatus === 'loading') {
     return (
@@ -27,6 +27,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
   if (!currentUser) return <Navigate to="/login" replace />;
+  if (currentUser.role === 'viewer' && !viewerAllowed) {
+    return <Navigate to="/dashboard/executive" replace />;
+  }
   return <Layout>{children}</Layout>;
 }
 
@@ -45,14 +48,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={currentUser ? <Navigate to="/dashboard/executive" replace /> : <LoginPage />} />
-      <Route path="/dashboard/executive"  element={<ProtectedRoute><ExecutiveDashboard /></ProtectedRoute>} />
-      <Route path="/dashboard/financial"  element={<ProtectedRoute><FinancialDashboard /></ProtectedRoute>} />
-      <Route path="/dashboard/operations" element={<ProtectedRoute><OperationsDashboard /></ProtectedRoute>} />
+      <Route path="/dashboard/executive"  element={<ProtectedRoute viewerAllowed><ExecutiveDashboard /></ProtectedRoute>} />
+      <Route path="/dashboard/financial"  element={<ProtectedRoute viewerAllowed><FinancialDashboard /></ProtectedRoute>} />
+      <Route path="/dashboard/operations" element={<ProtectedRoute viewerAllowed><OperationsDashboard /></ProtectedRoute>} />
       <Route path="/dashboard/vendor"     element={<ProtectedRoute><VendorDashboard /></ProtectedRoute>} />
       <Route path="/requirements"         element={<ProtectedRoute><RequirementsPage /></ProtectedRoute>} />
-      <Route path="/vendors"              element={<ProtectedRoute><VendorsPage /></ProtectedRoute>} />
+      <Route path="/vendors"              element={<ProtectedRoute viewerAllowed><VendorsPage /></ProtectedRoute>} />
       <Route path="/records"              element={<ProtectedRoute><RecordsPage /></ProtectedRoute>} />
-      <Route path="/chat"                 element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+      <Route path="/chat"                 element={<ProtectedRoute viewerAllowed><ChatPage /></ProtectedRoute>} />
       <Route path="/installation/new"     element={<ProtectedRoute><InstallationFormPage /></ProtectedRoute>} />
       <Route path="/installation/edit/:id" element={<ProtectedRoute><InstallationFormPage /></ProtectedRoute>} />
       <Route path="/installation/bulk"    element={<ProtectedRoute><BulkUploadPage /></ProtectedRoute>} />

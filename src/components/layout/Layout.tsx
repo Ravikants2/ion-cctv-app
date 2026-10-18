@@ -11,14 +11,14 @@ import {
 } from 'lucide-react';
 
 const navItems = [
-  { to: '/dashboard/executive',  label: 'Executive',    icon: LayoutDashboard },
-  { to: '/dashboard/financial',  label: 'Financial',    icon: TrendingUp      },
-  { to: '/dashboard/operations', label: 'Operations',   icon: Wrench          },
-  { to: '/dashboard/vendor',     label: 'Vendor',       icon: Users           },
-  { to: '/requirements',         label: 'Requirements', icon: FileText        },
-  { to: '/vendors',              label: 'Vendors',      icon: Users           },
-  { to: '/records',              label: 'Records',      icon: ClipboardList   },
-  { to: '/chat',                 label: 'AI Chat',      icon: MessageCircle   },
+  { to: '/dashboard/executive',  label: 'Dashboard',         icon: LayoutDashboard, viewerVisible: true },
+  { to: '/dashboard/financial',  label: 'Finance',            icon: TrendingUp,      viewerVisible: true },
+  { to: '/dashboard/operations', label: 'Operations',         icon: Wrench,          viewerVisible: true },
+  { to: '/dashboard/vendor',     label: 'Vendor Dashboard',   icon: Users,           viewerVisible: false },
+  { to: '/requirements',         label: 'Requirements',       icon: FileText,        viewerVisible: false },
+  { to: '/vendors',              label: 'Vendors',             icon: Users,           viewerVisible: true },
+  { to: '/records',              label: 'Records',             icon: ClipboardList,  viewerVisible: false },
+  { to: '/chat',                 label: 'AI Chat',             icon: MessageCircle,   viewerVisible: true },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -27,6 +27,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen]   = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const restoreRef = useRef<HTMLInputElement>(null);
+  const isViewer = currentUser?.role === 'viewer';
+  const visibleNavItems = navItems.filter(item => !isViewer || item.viewerVisible);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -50,10 +52,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* ── Header ── */}
-      <header className="bg-[#0d1b3e] text-white sticky top-0 z-40 shadow-lg">
-        <div className="max-w-screen-2xl mx-auto px-3 h-14 flex items-center justify-between gap-2">
+      <header className="bg-slate-950 text-white sticky top-0 z-40 border-b border-white/10 shadow-xl shadow-slate-950/10">
+        <div className="max-w-screen-2xl mx-auto px-4 h-[68px] flex items-center justify-between gap-4">
 
           {/* Left: hamburger + title */}
           <div className="flex items-center gap-2 min-w-0">
@@ -61,18 +63,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
               onClick={() => setMobileOpen(v => !v)} aria-label="Toggle menu">
               {mobileOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <span className="font-bold text-xs sm:text-sm tracking-tight truncate">
-              iON Survillance Temp. infra(CCTV)
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sky-400 to-blue-600 shadow-lg shadow-blue-950/40">
+              <LayoutDashboard size={18} />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold tracking-tight sm:text-base">iON CCTV</span>
+              <span className="hidden text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400 sm:block">Operations workspace</span>
             </span>
           </div>
 
           {/* Centre: desktop nav */}
-          <nav className="hidden md:flex items-center gap-0.5 flex-1 justify-center" aria-label="Main navigation">
-            {navItems.map(item => (
+          <nav className="hidden md:flex items-center gap-1 flex-1 justify-center" aria-label="Main navigation">
+            {visibleNavItems.map(item => (
               <NavLink key={item.to} to={item.to}
                 className={({ isActive }) => clsx(
-                  'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap',
-                  isActive ? 'bg-white/20 text-white' : 'text-white/75 hover:bg-white/10 hover:text-white'
+                  'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap',
+                  isActive ? 'bg-white/15 text-white shadow-inner ring-1 ring-white/10' : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
                 )}>
                 <item.icon size={13} />{item.label}
               </NavLink>
@@ -107,14 +113,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     <p className="text-xs font-semibold text-gray-800">{currentUser?.name}</p>
                     <p className="text-xs text-gray-500 capitalize">{currentUser?.role.replace('_', ' ')}</p>
                   </div>
-                  <button onClick={() => { exportBackup(data); setUserMenuOpen(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
-                    <Download size={13} /> Download Backup
-                  </button>
-                  <label className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer">
-                    <Upload size={13} /> Restore Backup
-                    <input ref={restoreRef} type="file" accept=".json" className="hidden" onChange={handleRestore} />
-                  </label>
+                  {!isViewer && (
+                    <>
+                      <button onClick={() => { exportBackup(data); setUserMenuOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
+                        <Download size={13} /> Download Backup
+                      </button>
+                      <label className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer">
+                        <Upload size={13} /> Restore Backup
+                        <input ref={restoreRef} type="file" accept=".json" className="hidden" onChange={handleRestore} />
+                      </label>
+                    </>
+                  )}
                   <div className="border-t mt-1">
                     <button onClick={handleLogout}
                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50">
@@ -130,10 +140,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Mobile nav */}
         {mobileOpen && (
           <nav className="md:hidden border-t border-white/20 px-3 py-2 flex flex-col gap-0.5" aria-label="Mobile navigation">
-            {navItems.map(item => (
+            {visibleNavItems.map(item => (
               <NavLink key={item.to} to={item.to} onClick={() => setMobileOpen(false)}
                 className={({ isActive }) => clsx(
-                  'flex items-center gap-2 px-3 py-2 rounded text-sm',
+                  'flex items-center gap-2 px-3 py-2 rounded-lg text-sm',
                   isActive ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/10'
                 )}>
                 <item.icon size={15} />{item.label}
@@ -151,7 +161,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         )}
       </header>
 
-      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 py-6">
+      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 py-7 sm:px-6 lg:px-8">
         {children}
       </main>
     </div>
