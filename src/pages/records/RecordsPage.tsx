@@ -10,8 +10,9 @@ import { getInstallationStats } from '../../utils/calculations';
 import { Download, Printer, Eye, Pencil } from 'lucide-react';
 import { TablePagination } from '../../components/ui/TablePagination';
 import { CostValue } from '../../components/ui/CostValue';
+import { normalizeExamDate } from '../../utils/dates';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 export default function RecordsPage() {
   const { data, can } = useAuth();
@@ -44,7 +45,8 @@ export default function RecordsPage() {
     if (filterState && req.state !== filterState) return false;
     if (filterCity && req.city !== filterCity) return false;
     if (startDate || endDate) {
-      const dates = data.examDates.filter(d => d.installationRecordId === inst.id).map(d => d.examDate);
+      const dates = data.examDates.filter(d => d.installationRecordId === inst.id)
+        .map(d => normalizeExamDate(d.examDate) || d.examDate);
       if (dates.length === 0) return false;
       if (startDate && !dates.some(d => d >= startDate)) return false;
       if (endDate && !dates.some(d => d <= endDate)) return false;

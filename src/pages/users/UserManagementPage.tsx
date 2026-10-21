@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { Input, Select } from '../../components/ui/FormFields';
 import { Alert, ConfirmDialog, Modal } from '../../components/ui/index';
 import { SortableTable } from '../../components/ui/SortableTable';
+import { TablePagination } from '../../components/ui/TablePagination';
 import { hashPassword } from '../../utils/storage';
 import type { Role, User } from '../../types';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
@@ -16,25 +17,32 @@ const roleOptions = [
   { value: 'user', label: 'User' },
   { value: 'viewer', label: 'Viewer' },
 ];
+const PAGE_SIZE = 10;
 
 export default function UserManagementPage() {
   const { data, updateData, addAuditLog, can, currentUser } = useAuth();
-  const [modal, setModal] = useState<'create' | 'password' | null>(null);
+  const [modal, setModal] = useState<'create' | 'password' | 'role' | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [form, setForm] = useState({ name: '', email: '', role: 'user' as Role, password: '' });
   const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<Role>('user');
+  const [page, setPage] = useState(1);
 
   if (!can('manage_users')) {
     return <Alert type="error">Only a super admin can manage users.</Alert>;
   }
+  const pageCount = Math.max(1, Math.ceil(data.users.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageUsers = data.users.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const closeModal = () => {
     setModal(null);
     setSelectedUser(null);
     setForm({ name: '', email: '', role: 'user', password: '' });
     setNewPassword('');
+    setNewRole('user');
   };
 
   const createUser = (event: React.FormEvent<HTMLFormElement>) => {
@@ -79,6 +87,27 @@ export default function UserManagementPage() {
     setAlert({ type: 'success', message: `Password updated for ${selectedUser.name}.` });
   };
 
+  const changeRole = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedUser) return;
+    if (selectedUser.id === currentUser?.id) {
+      setAlert({ type: 'error', message: 'You cannot change your own role.' });
+      return;
+    }
+    const remainingAdmins = data.users.filter(user => user.role === 'super_admin' && user.id !== selectedUser.id);
+    if (selectedUser.role === 'super_admin' && newRole !== 'super_admin' && remainingAdmins.length === 0) {
+      setAlert({ type: 'error', message: 'At least one super admin must remain.' });
+      return;
+    }
+    updateData(previous => ({
+      ...previous,
+      users: previous.users.map(user => user.id === selectedUser.id ? { ...user, role: newRole } : user),
+    }));
+    addAuditLog('UPDATE', 'User', selectedUser.id, { role: selectedUser.role }, { role: newRole });
+    closeModal();
+    setAlert({ type: 'success', message: `Role updated for ${selectedUser.name}.` });
+  };
+
   const confirmDelete = () => {
     if (!deleteUser) return;
     const remainingAdmins = data.users.filter(user => user.role === 'super_admin' && user.id !== deleteUser.id);
@@ -99,7 +128,7 @@ export default function UserManagementPage() {
         <div>
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Access control</p>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">User Management</h1>
-          <p className="mt-1 text-sm text-slate-500">Create accounts, change passwords, and remove access.</p>
+          <p className="mt-1 text-sm text-slate-500">Create accounts, manage roles, change passwords, and remove access.</p>
         </div>
         <Button onClick={() => { setAlert(null); setModal('create'); }}><Plus size={14} /> Create User</Button>
       </div>
@@ -114,13 +143,17 @@ export default function UserManagementPage() {
             ))}
           </tr></thead>
           <tbody>
-            {data.users.map(user => (
+            {pageUsers.map(user => (
               <tr key={user.id} className="border-t hover:bg-gray-50">
                 <td className="px-4 py-3 font-medium">{user.name}</td>
                 <td className="px-4 py-3">{user.email}</td>
                 <td className="px-4 py-3 capitalize">{user.role.replace('_', ' ')}</td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={user.id === currentUser?.id}
+                      onClick={() => { setAlert(null); setSelectedUser(user); setNewRole(user.role); setModal('role'); }}>
+                      Change role
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => { setAlert(null); setSelectedUser(user); setModal('password'); }}>
                       <KeyRound size={13} /> Change password
                     </Button>
@@ -134,6 +167,7 @@ export default function UserManagementPage() {
             ))}
           </tbody>
         </SortableTable>
+        <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={data.users.length} onPageChange={setPage} />
       </div>
 
       <Modal open={modal === 'create'} onClose={closeModal} title="Create User">
@@ -158,6 +192,17 @@ export default function UserManagementPage() {
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" onClick={closeModal}>Cancel</Button>
             <Button type="submit">Update Password</Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={modal === 'role'} onClose={closeModal} title={`Change role${selectedUser ? ` — ${selectedUser.name}` : ''}`}>
+        <form onSubmit={changeRole} className="flex flex-col gap-3">
+          <Select label="Access role" value={newRole} options={roleOptions}
+            onChange={event => setNewRole(event.target.value as Role)} />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" onClick={closeModal}>Cancel</Button>
+            <Button type="submit">Update Role</Button>
           </div>
         </form>
       </Modal>

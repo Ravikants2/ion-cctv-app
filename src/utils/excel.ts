@@ -1,5 +1,7 @@
 import * as XLSX from 'xlsx';
 import type { RequirementMaster, VendorMaster, InstallationRecord, ExamDateDetail } from '../types';
+import { normalizeExamDate } from './dates';
+import { getVendorCode } from './vendorCode';
 
 export function downloadTemplate(type: 'requirement' | 'vendor' | 'installation'): void {
   let headers: string[] = [];
@@ -75,7 +77,7 @@ export function parseVendorFile(file: File): Promise<Partial<VendorMaster>[]> {
 
 export function exportVendorsToExcel(vendors: VendorMaster[]): void {
   const rows = vendors.map(vendor => ({
-    'Vendor ID': vendor.vendorCode || vendor.id,
+    'Vendor ID': getVendorCode(vendor),
     'Zone': vendor.zone,
     'Vendor Name': vendor.vendorName,
   }));
@@ -119,7 +121,7 @@ export function parseBulkInstallationFile(file: File): Promise<BulkInstallationR
           clientName: String(r['Client Name'] || '').trim(),
           examName: String(r['Exam Name'] || '').trim(),
           tcCode: String(r['TC Code'] || '').trim(),
-          examDate: String(r['Exam Date'] || '').trim(),
+          examDate: normalizeExamDate(String(r['Exam Date'] || '').trim()) || String(r['Exam Date'] || '').trim(),
           scheduledCandidates: Number(r['Scheduled Candidates']) || 0,
           installationType: String(r['Installation Type'] || '').trim(),
           vendorName: String(r['Vendor Name'] || '').trim(),

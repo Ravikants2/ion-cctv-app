@@ -9,12 +9,9 @@ import { downloadTemplate, exportVendorsToExcel, parseVendorFile } from '../../u
 import type { VendorMaster } from '../../types';
 import { Download, Upload, Trash2, Plus } from 'lucide-react';
 import { TablePagination } from '../../components/ui/TablePagination';
+import { createVendorCode, getVendorCode, isVendorCodeForZone } from '../../utils/vendorCode';
 
-const PAGE_SIZE = 25;
-
-function createVendorCode(): string {
-  return `VND-${uuidv4().slice(0, 8).toUpperCase()}`;
-}
+const PAGE_SIZE = 10;
 
 export default function VendorsPage() {
   const { data, updateData, addAuditLog, can, currentUser } = useAuth();
@@ -25,7 +22,7 @@ export default function VendorsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [addModal, setAddModal] = useState(false);
-  const [form, setForm] = useState<{ vendorCode: string; zone: string; vendorName: string }>({ vendorCode: createVendorCode(), zone: '', vendorName: '' });
+  const [form, setForm] = useState<{ vendorCode: string; zone: string; vendorName: string }>({ vendorCode: '', zone: '', vendorName: '' });
   const [formError, setFormError] = useState('');
   const [page, setPage] = useState(1);
 
@@ -35,7 +32,7 @@ export default function VendorsPage() {
     if (filterZone && v.zone !== filterZone) return false;
     if (search && !v.vendorName.toLowerCase().includes(search.toLowerCase()) &&
       !v.zone.toLowerCase().includes(search.toLowerCase()) &&
-      !(v.vendorCode || v.id).toLowerCase().includes(search.toLowerCase())) return false;
+      !getVendorCode(v).toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -51,21 +48,35 @@ export default function VendorsPage() {
       const previewRows = rows.map(row => {
         if (!row.zone || !row.vendorName) return { ...row, status: 'ERROR' as const, error: 'Missing fields' };
         const normalizedCode = row.vendorCode?.trim().toLowerCase();
+        if (row.vendorCode && !isVendorCodeForZone(row.vendorCode, row.zone)) {
+          return { ...row, status: 'ERROR' as const, error: 'Vendor ID must match Zone Name-12345' };
+        }
         if (normalizedCode && importedVendorCodes.has(normalizedCode)) {
           return { ...row, status: 'ERROR' as const, error: 'Vendor ID appears more than once in the file' };
         }
         if (normalizedCode) importedVendorCodes.add(normalizedCode);
         const existing = data.vendors.find(v =>
-          (normalizedCode && (v.vendorCode || v.id).toLowerCase() === normalizedCode) ||
+          (normalizedCode && getVendorCode(v).toLowerCase() === normalizedCode) ||
           (v.zone === row.zone && v.vendorName === row.vendorName)
         );
         const duplicateCode = row.vendorCode && data.vendors.some(v =>
-          (v.vendorCode || v.id).toLowerCase() === normalizedCode && v.id !== existing?.id
+          getVendorCode(v).toLowerCase() === normalizedCode && v.id !== existing?.id
         );
         if (duplicateCode) return { ...row, status: 'ERROR' as const, error: 'Vendor ID already belongs to another vendor' };
+        let vendorCode = row.vendorCode || (existing ? getVendorCode(existing) : createVendorCode(row.zone, data.vendors));
+        if (!normalizedCode && !existing) {
+          while (importedVendorCodes.has(vendorCode.toLowerCase())) {
+            vendorCode = createVendorCode(row.zone, data.vendors);
+          }
+        }
+        const finalCode = vendorCode.toLowerCase();
+        if (!normalizedCode && importedVendorCodes.has(finalCode)) {
+          return { ...row, status: 'ERROR' as const, error: 'Generated Vendor ID conflicts with another row; retry the upload' };
+        }
+        importedVendorCodes.add(finalCode);
         return {
           ...row,
-          vendorCode: row.vendorCode || existing?.vendorCode || existing?.id || createVendorCode(),
+          vendorCode,
           id: existing?.id,
           status: existing ? 'UPDATE' as const : 'NEW' as const,
         };
@@ -84,9 +95,9 @@ export default function VendorsPage() {
       let vendors = [...prev.vendors];
       valid.forEach(row => {
         if (row.status === 'UPDATE' && row.id) {
-          vendors = vendors.map(v => v.id === row.id ? { ...v, vendorCode: row.vendorCode || v.vendorCode || v.id, zone: row.zone!, vendorName: row.vendorName!, updatedAt: new Date().toISOString() } : v);
+          vendors = vendors.map(v => v.id === row.id ? { ...v, vendorCode: row.vendorCode || getVendorCode(v), zone: row.zone!, vendorName: row.vendorName!, updatedAt: new Date().toISOString() } : v);
         } else {
-          vendors.push({ id: uuidv4(), vendorCode: row.vendorCode || createVendorCode(), zone: row.zone!, vendorName: row.vendorName!, createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+          vendors.push({ id: uuidv4(), vendorCode: row.vendorCode || createVendorCode(row.zone!, vendors), zone: row.zone!, vendorName: row.vendorName!, createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
         }
       });
       return { ...prev, vendors };
@@ -112,18 +123,23 @@ export default function VendorsPage() {
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.zone || !form.vendorName || !form.vendorCode.trim()) { setFormError('All fields required.'); return; }
+    if (!form.zone || !form.vendorName) { setFormError('All fields required.'); return; }
+    const vendorCode = form.vendorCode.trim() || createVendorCode(form.zone, data.vendors);
+    if (!isVendorCodeForZone(vendorCode, form.zone)) {
+      setFormError('Vendor ID must use the selected zone followed by a hyphen and five digits.');
+      return;
+    }
     const dup = data.vendors.find(v => v.zone === form.zone && v.vendorName === form.vendorName);
     if (dup) { setFormError('Duplicate: Zone + Vendor Name already exists.'); return; }
-    if (data.vendors.some(v => (v.vendorCode || v.id).toLowerCase() === form.vendorCode.trim().toLowerCase())) {
+    if (data.vendors.some(v => getVendorCode(v).toLowerCase() === vendorCode.toLowerCase())) {
       setFormError('Vendor ID already exists.');
       return;
     }
-    const newV: VendorMaster = { id: uuidv4(), vendorCode: form.vendorCode.trim(), zone: form.zone, vendorName: form.vendorName.trim(), createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const newV: VendorMaster = { id: uuidv4(), vendorCode, zone: form.zone, vendorName: form.vendorName.trim(), createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     updateData(prev => ({ ...prev, vendors: [...prev.vendors, newV] }));
     addAuditLog('CREATE', 'VendorMaster', newV.id, undefined, newV);
     setAddModal(false);
-    setForm({ vendorCode: createVendorCode(), zone: '', vendorName: '' });
+    setForm({ vendorCode: '', zone: '', vendorName: '' });
     setFormError('');
     setAlert({ type: 'success', msg: 'Vendor added.' });
   };
@@ -141,7 +157,11 @@ export default function VendorsPage() {
               <input ref={fileInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
             </>
           )}
-          {can('upload_master') && <Button size="sm" onClick={() => setAddModal(true)}><Plus size={14} /> Add</Button>}
+          {can('upload_master') && <Button size="sm" onClick={() => {
+            setForm({ vendorCode: '', zone: '', vendorName: '' });
+            setFormError('');
+            setAddModal(true);
+          }}><Plus size={14} /> Add</Button>}
         </div>
       </div>
 
@@ -192,7 +212,7 @@ export default function VendorsPage() {
             {filtered.length === 0 ? <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No vendors found.</td></tr>
               : pageRows.map(v => (
                 <tr key={v.id} className="border-t hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs">{v.vendorCode || v.id}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{getVendorCode(v)}</td>
                   <td className="px-4 py-3">{v.zone}</td>
                   <td className="px-4 py-3">{v.vendorName}</td>
                   <td className="px-4 py-3 text-xs text-gray-500">{new Date(v.createdAt).toLocaleDateString('en-IN')}</td>
@@ -211,8 +231,12 @@ export default function VendorsPage() {
 
       <Modal open={addModal} onClose={() => { setAddModal(false); setFormError(''); }} title="Add Vendor">
         <form onSubmit={handleAddSubmit} className="flex flex-col gap-3">
-          <Input label="Vendor ID" value={form.vendorCode} onChange={e => setForm(p => ({ ...p, vendorCode: e.target.value }))} required />
-          <Select label="Zone" value={form.zone} onChange={e => setForm(p => ({ ...p, zone: e.target.value }))}
+          <Input label="Vendor ID" value={form.vendorCode} onChange={e => setForm(p => ({ ...p, vendorCode: e.target.value }))} placeholder={form.zone ? `${form.zone}-12345` : 'Select a zone first'} />
+          <Select label="Zone" value={form.zone} onChange={e => setForm(p => ({
+            ...p,
+            zone: e.target.value,
+            vendorCode: e.target.value ? createVendorCode(e.target.value, data.vendors) : '',
+          }))}
             options={zones.map(z => ({ value: z, label: z }))} placeholder="Select Zone" required />
           <Input label="Vendor Name" value={form.vendorName} onChange={e => setForm(p => ({ ...p, vendorName: e.target.value }))} required />
           {formError && <Alert type="error">{formError}</Alert>}

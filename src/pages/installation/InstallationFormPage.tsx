@@ -7,6 +7,7 @@ import { Input, Select, Textarea } from '../../components/ui/FormFields';
 import { Alert } from '../../components/ui/index';
 import type { InstallationRecord, ExamDateDetail, InstallationType, StorageType, StorageUnit } from '../../types';
 import { Plus, Trash2, FileText, Eye } from 'lucide-react';
+import { normalizeExamDate } from '../../utils/dates';
 
 interface ExamDateRow {
   id: string;
@@ -71,7 +72,7 @@ export default function InstallationFormPage() {
       setRemarks(existingRecord.remarks || '');
       setExistingQuotationId(existingRecord.quotationFileId);
       const dates = data.examDates.filter(d => d.installationRecordId === existingRecord.id);
-      setExamDates(dates.map(d => ({ id: d.id, examDate: d.examDate, scheduledCandidates: d.scheduledCandidates })));
+      setExamDates(dates.map(d => ({ id: d.id, examDate: normalizeExamDate(d.examDate) || '', scheduledCandidates: d.scheduledCandidates })));
     }
   }, [existingRecord, data]);
 

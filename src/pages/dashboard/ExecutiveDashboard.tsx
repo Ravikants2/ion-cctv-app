@@ -10,7 +10,7 @@ import { CostValue } from '../../components/ui/CostValue';
 import { TablePagination } from '../../components/ui/TablePagination';
 
 type DrillLevel = 'top' | 'client' | 'exam' | 'zone' | 'state' | 'city' | 'tc';
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 interface DrillState {
   level: DrillLevel;

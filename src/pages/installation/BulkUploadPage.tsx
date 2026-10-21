@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { SortableTable } from '../../components/ui/SortableTable';
+import { formatExamDate, normalizeExamDate } from '../../utils/dates';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -36,7 +37,8 @@ export default function BulkUploadPage() {
           r.clientName === row.clientName && r.examName === row.examName && r.tcCode === row.tcCode
         );
         if (!req) errors.push('Requirement not found');
-        if (!row.examDate || isNaN(Date.parse(row.examDate))) errors.push('Invalid exam date');
+        if (!normalizeExamDate(row.examDate)) errors.push('Invalid exam date');
+        else row.examDate = normalizeExamDate(row.examDate)!;
         if (row.scheduledCandidates < 0) errors.push('Negative candidates');
         if (!['Full Vendor', 'Partial Vendor'].includes(row.installationType)) errors.push('Invalid installation type');
         const vendor = req ? data.vendors.find(v => v.zone === req.zone && v.vendorName === row.vendorName) : undefined;
@@ -194,7 +196,7 @@ export default function BulkUploadPage() {
                     <td className="px-2 py-1">{r.clientName}</td>
                     <td className="px-2 py-1">{r.examName}</td>
                     <td className="px-2 py-1">{r.tcCode}</td>
-                    <td className="px-2 py-1">{r.examDate}</td>
+                    <td className="px-2 py-1">{formatExamDate(r.examDate)}</td>
                     <td className="px-2 py-1">{r.scheduledCandidates}</td>
                     <td className="px-2 py-1">{r.vendorName}</td>
                     <td className="px-2 py-1">₹{r.localVendorCost}</td>

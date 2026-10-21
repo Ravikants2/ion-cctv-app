@@ -10,7 +10,7 @@ import { CheckCircle, Clock, FileText, AlertTriangle, Pencil } from 'lucide-reac
 import { CostValue } from '../../components/ui/CostValue';
 import { TablePagination } from '../../components/ui/TablePagination';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 export default function OperationsDashboard() {
   const { data } = useAuth();
@@ -18,6 +18,8 @@ export default function OperationsDashboard() {
   const navigate = useNavigate();
   const [kpiDetail, setKpiDetail] = useState<string | null>(null);
   const [detailPage, setDetailPage] = useState(1);
+  const [pendingPage, setPendingPage] = useState(1);
+  const [attentionPage, setAttentionPage] = useState(1);
 
   const filtered = applyDashboardFilters(data.installations, data.requirements, data.examDates, filters);
   const allReqs = data.requirements.filter(r => {
@@ -53,6 +55,10 @@ export default function OperationsDashboard() {
     return !i.quotationFileId || totalCandidates === 0 || i.cameraCount === 0 ||
       i.localVendorCost === 0 || !i.vendorId || (i.storageProvided && !i.storageType);
   });
+  const pendingCurrentPage = Math.min(pendingPage, Math.max(1, Math.ceil(pending.length / PAGE_SIZE)));
+  const pendingRows = pending.slice((pendingCurrentPage - 1) * PAGE_SIZE, pendingCurrentPage * PAGE_SIZE);
+  const attentionCurrentPage = Math.min(attentionPage, Math.max(1, Math.ceil(attentionItems.length / PAGE_SIZE)));
+  const attentionRows = attentionItems.slice((attentionCurrentPage - 1) * PAGE_SIZE, attentionCurrentPage * PAGE_SIZE);
 
   if (kpiDetail) {
     const items = kpiDetail === 'pending'
@@ -158,7 +164,7 @@ export default function OperationsDashboard() {
               ))}
             </tr></thead>
             <tbody>
-              {pending.slice(0, 10).map(req => (
+              {pendingRows.map(req => (
                 <tr key={req.id} className="border-t hover:bg-gray-50">
                   <td className="px-3 py-2">{req.clientName}</td>
                   <td className="px-3 py-2">{req.examName}</td>
@@ -169,11 +175,9 @@ export default function OperationsDashboard() {
                   <td className="px-3 py-2">{req.tcName}</td>
                 </tr>
               ))}
-              {pending.length > 10 && (
-                <tr><td colSpan={7} className="px-3 py-2 text-center text-blue-600 cursor-pointer hover:underline text-xs" onClick={() => setKpiDetail('pending')}>View all {pending.length} pending…</td></tr>
-              )}
             </tbody>
           </SortableTable>
+          <TablePagination page={pendingCurrentPage} pageSize={PAGE_SIZE} totalItems={pending.length} onPageChange={setPendingPage} />
         </div>
       )}
 
@@ -189,7 +193,7 @@ export default function OperationsDashboard() {
               ))}
             </tr></thead>
             <tbody>
-              {attentionItems.map(inst => {
+              {attentionRows.map(inst => {
                 const req = data.requirements.find(r => r.id === inst.requirementId);
                 const { totalCandidates } = getInstallationStats(inst, data.examDates);
                 const issues = [
@@ -219,6 +223,7 @@ export default function OperationsDashboard() {
               })}
             </tbody>
           </SortableTable>
+          <TablePagination page={attentionCurrentPage} pageSize={PAGE_SIZE} totalItems={attentionItems.length} onPageChange={setAttentionPage} />
         </div>
       )}
     </div>

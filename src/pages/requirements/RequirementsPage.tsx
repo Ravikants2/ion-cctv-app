@@ -10,7 +10,7 @@ import type { RequirementMaster } from '../../types';
 import { Download, Upload, Trash2, Plus } from 'lucide-react';
 import { TablePagination } from '../../components/ui/TablePagination';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 interface PreviewRow extends Partial<RequirementMaster> {
   status: 'NEW' | 'UPDATE' | 'ERROR';

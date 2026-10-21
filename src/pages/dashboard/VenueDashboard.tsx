@@ -9,9 +9,11 @@ import { CostValue } from '../../components/ui/CostValue';
 import { applyDashboardFilters, safeDiv } from '../../utils/calculations';
 import { TablePagination } from '../../components/ui/TablePagination';
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { formatExamDate, normalizeExamDate } from '../../utils/dates';
+import { getVendorCode } from '../../utils/vendorCode';
 
-const PAGE_SIZE = 25;
-type VenueMetric = 'days' | 'candidates' | 'cost' | 'perCandidate' | 'vendors';
+const PAGE_SIZE = 10;
+type VenueMetric = 'days' | 'candidates' | 'cameras' | 'cost' | 'perCandidate' | 'vendors';
 
 interface VenueSummary {
   key: string;
@@ -22,6 +24,7 @@ interface VenueSummary {
   installations: ReturnType<typeof applyDashboardFilters>;
   days: number;
   candidates: number;
+  cameras: number;
   cost: number;
   perCandidate: number;
   vendors: string[];
@@ -51,6 +54,7 @@ export default function VenueDashboard() {
         installations: [],
         days: 0,
         candidates: 0,
+        cameras: 0,
         cost: 0,
         perCandidate: 0,
         vendors: [],
@@ -67,13 +71,33 @@ export default function VenueDashboard() {
     const vendorIds = [...new Set(venue.installations.map(row => row.vendorId))];
     return {
       ...venue,
-      days: new Set(schedule.map(row => row.examDate)).size,
+      days: new Set(schedule.map(row => normalizeExamDate(row.examDate) || row.examDate)).size,
       candidates,
+      cameras: venue.installations.reduce((total, row) => total + row.cameraCount, 0),
       cost,
       perCandidate: safeDiv(cost, candidates),
       vendors: vendorIds,
     };
   }).sort((left, right) => left.zone.localeCompare(right.zone) || left.state.localeCompare(right.state) || left.tcCode.localeCompare(right.tcCode));
+  const totalCandidates = venues.reduce((total, venue) => total + venue.candidates, 0);
+  const totalCost = venues.reduce((total, venue) => total + venue.cost, 0);
+  const totalCameras = venues.reduce((total, venue) => total + venue.cameras, 0);
+  const totalVendors = new Set(venues.flatMap(venue => venue.vendors)).size;
+  const totalDays = venues.reduce((total, venue) => total + venue.days, 0);
+  const zoneSummaries = Array.from(venues.reduce((zones, venue) => {
+    const zone = zones.get(venue.zone) || { zone: venue.zone, venues: 0, candidates: 0, cameras: 0, cost: 0, vendors: new Set<string>() };
+    zone.venues++;
+    zone.candidates += venue.candidates;
+    zone.cameras += venue.cameras;
+    zone.cost += venue.cost;
+    venue.vendors.forEach(vendorId => zone.vendors.add(vendorId));
+    zones.set(venue.zone, zone);
+    return zones;
+  }, new Map<string, { zone: string; venues: number; candidates: number; cameras: number; cost: number; vendors: Set<string> }>()).values())
+    .sort((left, right) => right.cost - left.cost);
+  const topCostVenues = [...venues].sort((left, right) => right.cost - left.cost).slice(0, 10);
+  const topPerCandidateVenues = [...venues].filter(venue => venue.candidates > 0)
+    .sort((left, right) => right.perCandidate - left.perCandidate).slice(0, 10);
 
   const currentPage = Math.min(page, Math.max(1, Math.ceil(venues.length / PAGE_SIZE)));
   const pageRows = venues.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -84,9 +108,10 @@ export default function VenueDashboard() {
     ? selectedVenue.installations.slice((currentDetailPage - 1) * PAGE_SIZE, currentDetailPage * PAGE_SIZE)
     : [];
 
-  const metricButton = (venue: VenueSummary, metric: VenueMetric, content: ReactNode) => (
+  const metricButton = (venue: VenueSummary, metric: VenueMetric, content: ReactNode, title?: string) => (
     <button type="button" className="font-medium text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
       onClick={() => { setSelected({ key: venue.key, metric }); setDetailPage(1); }}
+      title={title}
       aria-label={`Show ${metric} details for ${venue.tcCode}`}>
       {content}
     </button>
@@ -99,15 +124,17 @@ export default function VenueDashboard() {
       cost: 'Cost incurred',
       perCandidate: 'Cost per candidate',
       vendors: 'Vendors assigned',
+      cameras: 'Camera details',
     };
     const vendorDetails = selected.metric === 'vendors'
       ? selectedVenue.vendors.map(vendorId => {
         const vendor = data.vendors.find(row => row.id === vendorId);
         const installations = selectedVenue.installations.filter(row => row.vendorId === vendorId);
         return {
-          vendorId: vendor?.vendorCode || vendorId,
+          vendorId: vendor ? getVendorCode(vendor) : vendorId,
           name: vendor?.vendorName || 'Unknown vendor',
           installations: installations.length,
+          cameras: installations.reduce((total, row) => total + row.cameraCount, 0),
           cost: installations.reduce((total, row) => total + row.localVendorCost, 0),
           candidates: installations.reduce((total, installation) =>
             total + data.examDates.filter(row => row.installationRecordId === installation.id)
@@ -119,7 +146,7 @@ export default function VenueDashboard() {
     return (
       <div>
         <GlobalFilters />
-        <Button variant="ghost" size="sm" className="mb-3" onClick={() => setSelected(null)}><ArrowLeft size={14} /> Back to Venue Dashboard</Button>
+        <Button variant="primary" size="sm" className="mb-4 shadow-md" onClick={() => setSelected(null)}><ArrowLeft size={14} /> Back to Venue Dashboard</Button>
         <div className="mb-4">
           <h1 className="text-xl font-bold text-gray-900">{selectedVenue.tcName} <span className="font-mono text-base text-gray-500">({selectedVenue.tcCode})</span></h1>
           <p className="text-sm text-gray-500">{selectedVenue.zone} · {selectedVenue.state} · {label[selected.metric]}</p>
@@ -128,13 +155,14 @@ export default function VenueDashboard() {
           <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
             <SortableTable className="w-full text-sm">
               <thead><tr className="bg-gray-50 text-left text-xs text-gray-600">
-                {['Vendor ID', 'Vendor Name', 'Installations', 'Candidates', 'Cost Incurred'].map(heading => <th key={heading} className="px-4 py-3">{heading}</th>)}
+                {['Vendor ID', 'Vendor Name', 'Installations', 'Cameras', 'Candidates', 'Cost Incurred'].map(heading => <th key={heading} className="px-4 py-3">{heading}</th>)}
               </tr></thead>
               <tbody>{vendorDetails.map(vendor => (
                 <tr key={vendor.vendorId} className="border-t">
                   <td className="px-4 py-3 font-mono text-xs">{vendor.vendorId}</td>
                   <td className="px-4 py-3">{vendor.name}</td>
                   <td className="px-4 py-3">{vendor.installations}</td>
+                  <td className="px-4 py-3">{vendor.cameras}</td>
                   <td className="px-4 py-3">{vendor.candidates.toLocaleString('en-IN')}</td>
                   <td className="px-4 py-3"><CostValue amount={vendor.cost} /></td>
                 </tr>
@@ -145,7 +173,7 @@ export default function VenueDashboard() {
           <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
             <SortableTable className="w-full text-sm">
               <thead><tr className="bg-gray-50 text-left text-xs text-gray-600">
-                {['Client', 'Exam', 'Vendor ID', 'Vendor', 'Exam Dates', 'CCTV Days', 'Candidates', 'Cost Incurred', 'Per Candidate'].map(heading => <th key={heading} className="px-3 py-3">{heading}</th>)}
+                {['Client', 'Exam', 'Vendor ID', 'Vendor', 'Exam Dates', 'CCTV Days', 'Candidates', 'Camera Count', 'Cost Incurred', 'Per Candidate'].map(heading => <th key={heading} className="px-3 py-3">{heading}</th>)}
               </tr></thead>
               <tbody>{detailInstallations.map(installation => {
                 const requirement = data.requirements.find(row => row.id === installation.requirementId);
@@ -156,11 +184,14 @@ export default function VenueDashboard() {
                   <tr key={installation.id} className="border-t">
                     <td className="px-3 py-3">{requirement?.clientName}</td>
                     <td className="px-3 py-3">{requirement?.examName}</td>
-                    <td className="px-3 py-3 font-mono text-xs">{vendor?.vendorCode || installation.vendorId}</td>
+                    <td className="px-3 py-3 font-mono text-xs">{vendor ? getVendorCode(vendor) : installation.vendorId}</td>
                     <td className="px-3 py-3">{vendor?.vendorName || 'Unknown vendor'}</td>
-                    <td className="px-3 py-3 text-xs">{[...new Set(dates.map(row => row.examDate))].sort().join(', ')}</td>
-                    <td className="px-3 py-3">{new Set(dates.map(row => row.examDate)).size}</td>
+                    <td className="px-3 py-3 text-xs">{[...new Set(dates.map(row => row.examDate))]
+                      .sort((left, right) => (normalizeExamDate(left) || left).localeCompare(normalizeExamDate(right) || right))
+                      .map(formatExamDate).join(', ')}</td>
+                    <td className="px-3 py-3">{new Set(dates.map(row => formatExamDate(row.examDate))).size}</td>
                     <td className="px-3 py-3">{candidates.toLocaleString('en-IN')}</td>
+                    <td className="px-3 py-3">{installation.cameraCount}</td>
                     <td className="px-3 py-3"><CostValue amount={installation.localVendorCost} /></td>
                     <td className="px-3 py-3"><CostValue amount={safeDiv(installation.localVendorCost, candidates)} /></td>
                   </tr>
@@ -177,7 +208,7 @@ export default function VenueDashboard() {
   return (
     <div>
       <GlobalFilters />
-      <div className="mb-4 flex items-end justify-between gap-3">
+      <div className="mb-5 flex items-end justify-between gap-3">
         <div>
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Venue performance</p>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Venue Dashboard</h1>
@@ -185,31 +216,131 @@ export default function VenueDashboard() {
         </div>
         {selected && <Button variant="outline" size="sm" onClick={() => setSelected(null)}>Close details <ChevronUp size={14} /></Button>}
       </div>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        {[
+          { label: 'Venues', value: venues.length },
+          { label: 'Temporary CCTV Days', value: totalDays },
+          { label: 'Scheduled Candidates', value: totalCandidates.toLocaleString('en-IN') },
+          { label: 'Cameras Installed', value: totalCameras.toLocaleString('en-IN') },
+          { label: 'Total Cost', value: <CostValue amount={totalCost} /> },
+          { label: 'Active Vendors', value: totalVendors },
+        ].map(metric => (
+          <div key={metric.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{metric.label}</p>
+            <p className="mt-2 text-xl font-bold text-slate-900">{metric.value}</p>
+          </div>
+        ))}
+      </div>
       <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
         <SortableTable className="w-full text-sm">
           <thead><tr className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-600">
-            {['Zone', 'State', 'TC Code', 'TC Name', 'Temporary CCTV Days', 'Scheduled Candidates', 'Cost Incurred', 'Cost per Candidate', 'Vendors'].map(heading => (
+            {['Zone', 'State', 'TC Code', 'TC Name', 'Temporary CCTV Days', 'Scheduled Candidates', 'Camera Count', 'Cost Incurred', 'Cost per Candidate', 'Vendors'].map(heading => (
               <th key={heading} className="whitespace-nowrap px-3 py-3">{heading}</th>
             ))}
           </tr></thead>
           <tbody>
-            {pageRows.length === 0 ? <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No venue data for the selected filters.</td></tr>
+            {pageRows.length === 0 ? <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No venue data for the selected filters.</td></tr>
               : pageRows.map(venue => (
-                <tr key={venue.key} className="border-t hover:bg-gray-50">
+                <tr key={venue.key} className="border-t hover:bg-sky-50/50">
+                  {(() => {
+                    const schedule = venue.installations.flatMap(installation =>
+                      data.examDates.filter(row => row.installationRecordId === installation.id)
+                    );
+                    const dateCandidates = new Map<string, number>();
+                    schedule.forEach(row => {
+                      const date = formatExamDate(row.examDate);
+                      dateCandidates.set(date, (dateCandidates.get(date) || 0) + row.scheduledCandidates);
+                    });
+                    const dateDetails = Array.from(dateCandidates.entries()).sort((left, right) =>
+                      (normalizeExamDate(left[0]) || left[0]).localeCompare(normalizeExamDate(right[0]) || right[0])
+                    );
+                    const vendorDetails = venue.vendors.map(vendorId => {
+                      const vendor = data.vendors.find(row => row.id === vendorId);
+                      return vendor ? `${getVendorCode(vendor)} — ${vendor.vendorName}` : vendorId;
+                    });
+                    const cameraDetails = venue.installations.map(installation => {
+                      const vendor = data.vendors.find(row => row.id === installation.vendorId);
+                      return `${vendor?.vendorName || 'Unknown vendor'}: ${installation.cameraCount} cameras`;
+                    });
+                    return <>
                   <td className="px-3 py-3">{venue.zone}</td>
                   <td className="px-3 py-3">{venue.state}</td>
                   <td className="px-3 py-3 font-mono text-xs">{venue.tcCode}</td>
                   <td className="px-3 py-3 font-medium">{venue.tcName}</td>
-                  <td className="px-3 py-3">{metricButton(venue, 'days', venue.days)} <ChevronDown size={12} className="inline text-blue-500" /></td>
-                  <td className="px-3 py-3">{metricButton(venue, 'candidates', venue.candidates.toLocaleString('en-IN'))} <ChevronDown size={12} className="inline text-blue-500" /></td>
-                  <td className="px-3 py-3">{metricButton(venue, 'cost', <CostValue amount={venue.cost} />)} <ChevronDown size={12} className="inline text-blue-500" /></td>
-                  <td className="px-3 py-3">{metricButton(venue, 'perCandidate', <CostValue amount={venue.perCandidate} />)} <ChevronDown size={12} className="inline text-blue-500" /></td>
-                  <td className="px-3 py-3">{metricButton(venue, 'vendors', venue.vendors.length)} <ChevronDown size={12} className="inline text-blue-500" /></td>
+                  <td className="px-3 py-3">{metricButton(venue, 'days', venue.days, dateDetails.map(([date]) => date).join(', ') || 'No exam dates recorded')} <ChevronDown size={12} className="inline text-blue-500" /></td>
+                  <td className="px-3 py-3">{metricButton(venue, 'candidates', venue.candidates.toLocaleString('en-IN'), dateDetails.map(([date, count]) => `${date}: ${count.toLocaleString('en-IN')} candidates`).join('\n') || 'No candidates scheduled')} <ChevronDown size={12} className="inline text-blue-500" /></td>
+                  <td className="px-3 py-3">{metricButton(venue, 'cameras', venue.cameras.toLocaleString('en-IN'), cameraDetails.join('\n') || 'No camera details')} <ChevronDown size={12} className="inline text-blue-500" /></td>
+                  <td className="px-3 py-3">{metricButton(venue, 'cost', <CostValue amount={venue.cost} />)}</td>
+                  <td className="px-3 py-3">{metricButton(venue, 'perCandidate', <CostValue amount={venue.perCandidate} />)}</td>
+                  <td className="px-3 py-3">{metricButton(venue, 'vendors', venue.vendors.length, vendorDetails.join('\n') || 'No vendors assigned')} <ChevronDown size={12} className="inline text-blue-500" /></td>
+                    </>;
+                  })()}
                 </tr>
               ))}
           </tbody>
         </SortableTable>
         <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={venues.length} onPageChange={setPage} />
+      </div>
+      <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+          <div className="border-b px-4 py-3">
+            <h2 className="font-semibold text-slate-900">Top 10 venues by total cost</h2>
+            <p className="mt-1 text-xs text-slate-500">Highest cumulative vendor cost in the selected date and venue filters.</p>
+          </div>
+          <SortableTable className="w-full text-sm">
+            <thead><tr className="bg-gray-50 text-left text-xs text-gray-600">
+              {['Rank', 'Zone', 'TC Code', 'Venue', 'Cost', 'Candidates'].map(heading => <th key={heading} className="px-3 py-2">{heading}</th>)}
+            </tr></thead>
+            <tbody>{topCostVenues.map((venue, index) => (
+              <tr key={venue.key} className="border-t">
+                <td className="px-3 py-2">{index + 1}</td><td className="px-3 py-2">{venue.zone}</td>
+                <td className="px-3 py-2 font-mono text-xs">{venue.tcCode}</td>
+                <td className="px-3 py-2">{metricButton(venue, 'cost', venue.tcName)}</td>
+                <td className="px-3 py-2"><CostValue amount={venue.cost} /></td>
+                <td className="px-3 py-2">{venue.candidates.toLocaleString('en-IN')}</td>
+              </tr>
+            ))}</tbody>
+          </SortableTable>
+        </div>
+        <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+          <div className="border-b px-4 py-3">
+            <h2 className="font-semibold text-slate-900">Top 10 venues by cost per candidate</h2>
+            <p className="mt-1 text-xs text-slate-500">Excludes venues with no scheduled candidates.</p>
+          </div>
+          <SortableTable className="w-full text-sm">
+            <thead><tr className="bg-gray-50 text-left text-xs text-gray-600">
+              {['Rank', 'Zone', 'TC Code', 'Venue', 'Per Candidate', 'Total Cost'].map(heading => <th key={heading} className="px-3 py-2">{heading}</th>)}
+            </tr></thead>
+            <tbody>{topPerCandidateVenues.map((venue, index) => (
+              <tr key={venue.key} className="border-t">
+                <td className="px-3 py-2">{index + 1}</td><td className="px-3 py-2">{venue.zone}</td>
+                <td className="px-3 py-2 font-mono text-xs">{venue.tcCode}</td>
+                <td className="px-3 py-2">{metricButton(venue, 'perCandidate', venue.tcName)}</td>
+                <td className="px-3 py-2"><CostValue amount={venue.perCandidate} /></td>
+                <td className="px-3 py-2"><CostValue amount={venue.cost} /></td>
+              </tr>
+            ))}</tbody>
+          </SortableTable>
+        </div>
+      </div>
+      <div className="mt-6 overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <div className="border-b px-4 py-3">
+          <h2 className="font-semibold text-slate-900">Zone performance analysis</h2>
+          <p className="mt-1 text-xs text-slate-500">Compare candidate volume, camera coverage, vendor count, and spending by zone.</p>
+        </div>
+        <SortableTable className="w-full text-sm">
+          <thead><tr className="bg-gray-50 text-left text-xs text-gray-600">
+            {['Zone', 'Venues', 'Candidates', 'Cameras', 'Vendors', 'Total Cost', 'Cost per Candidate'].map(heading => <th key={heading} className="px-3 py-2">{heading}</th>)}
+          </tr></thead>
+          <tbody>{zoneSummaries.map(zone => (
+            <tr key={zone.zone} className="border-t">
+              <td className="px-3 py-2 font-medium">{zone.zone}</td><td className="px-3 py-2">{zone.venues}</td>
+              <td className="px-3 py-2">{zone.candidates.toLocaleString('en-IN')}</td><td className="px-3 py-2">{zone.cameras.toLocaleString('en-IN')}</td>
+              <td className="px-3 py-2">{zone.vendors.size}</td><td className="px-3 py-2"><CostValue amount={zone.cost} /></td>
+              <td className="px-3 py-2"><CostValue amount={safeDiv(zone.cost, zone.candidates)} /></td>
+            </tr>
+          ))}</tbody>
+        </SortableTable>
       </div>
     </div>
   );

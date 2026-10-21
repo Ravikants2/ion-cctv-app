@@ -9,8 +9,10 @@ import { applyDashboardFilters, getInstallationStats, safeDiv, getUniqueExamDays
 import { Store } from 'lucide-react';
 import { CostValue } from '../../components/ui/CostValue';
 import { TablePagination } from '../../components/ui/TablePagination';
+import { getVendorCode } from '../../utils/vendorCode';
+import { normalizeExamDate } from '../../utils/dates';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 export default function VendorDashboard() {
   const { data } = useAuth();
@@ -32,7 +34,8 @@ export default function VendorDashboard() {
       let insts = filtered.filter(i => i.vendorId === vendor.id);
       if (startDate || endDate) {
         insts = insts.filter(i => {
-          const dates = data.examDates.filter(d => d.installationRecordId === i.id).map(d => d.examDate);
+          const dates = data.examDates.filter(d => d.installationRecordId === i.id)
+            .map(d => normalizeExamDate(d.examDate) || d.examDate);
           if (startDate && !dates.some(d => d >= startDate)) return false;
           if (endDate && !dates.some(d => d <= endDate)) return false;
           return true;
@@ -67,7 +70,7 @@ export default function VendorDashboard() {
       <div>
         <GlobalFilters />
         <button onClick={() => setDrillVendorId(null)} className="text-blue-600 hover:underline text-sm mb-4 block">← Back to Vendor Dashboard</button>
-        <h2 className="text-lg font-bold mb-4">Vendor: {drillVendor.vendor.vendorName} <span className="font-mono text-sm font-normal text-gray-500">({drillVendor.vendor.vendorCode || drillVendor.vendor.id})</span></h2>
+        <h2 className="text-lg font-bold mb-4">Vendor: {drillVendor.vendor.vendorName} <span className="font-mono text-sm font-normal text-gray-500">({getVendorCode(drillVendor.vendor)})</span></h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           <KPICard title="Venues" value={drillVendor.venues} color="blue" />
           <KPICard title="Candidates" value={drillVendor.candidates.toLocaleString('en-IN')} color="purple" />
@@ -142,7 +145,7 @@ export default function VendorDashboard() {
               <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No vendor data for selected filters.</td></tr>
             ) : summaryRows.map(v => (
               <tr key={v.vendor.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => setDrillVendorId(v.vendor.id)}>
-                <td className="px-3 py-2 font-mono text-xs">{v.vendor.vendorCode || v.vendor.id}</td>
+                <td className="px-3 py-2 font-mono text-xs">{getVendorCode(v.vendor)}</td>
                 <td className="px-3 py-2 font-medium text-blue-700">{v.vendor.vendorName}</td>
                 <td className="px-3 py-2">{v.clients}</td>
                 <td className="px-3 py-2">{v.exams}</td>

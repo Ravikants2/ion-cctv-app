@@ -1,4 +1,5 @@
 import type { InstallationRecord, ExamDateDetail, RequirementMaster, VendorMaster, DashboardFilters } from '../types';
+import { normalizeExamDate } from './dates';
 
 export function formatINR(amount: number): string {
   if (isNaN(amount) || amount === 0) return '₹0';
@@ -66,7 +67,7 @@ export function getInstallationStats(
   examDates: ExamDateDetail[]
 ) {
   const dates = examDates.filter(d => d.installationRecordId === installation.id);
-  const uniqueDates = [...new Set(dates.map(d => d.examDate))];
+  const uniqueDates = [...new Set(dates.map(d => normalizeExamDate(d.examDate) || d.examDate))];
   const totalCandidates = dates.reduce((s, d) => s + d.scheduledCandidates, 0);
   const perCandidateCost = safeDiv(installation.localVendorCost, totalCandidates);
   return { examDays: uniqueDates.length, totalCandidates, perCandidateCost, uniqueDates };
@@ -87,8 +88,8 @@ export function applyDashboardFilters(
     if (filters.startDate || filters.endDate) {
       const dates = examDates.filter(d => d.installationRecordId === inst.id).map(d => d.examDate);
       if (!dates.some(d =>
-        (!filters.startDate || d >= filters.startDate) &&
-        (!filters.endDate || d <= filters.endDate)
+        (!filters.startDate || (normalizeExamDate(d) || d) >= filters.startDate) &&
+        (!filters.endDate || (normalizeExamDate(d) || d) <= filters.endDate)
       )) return false;
     }
     return true;
@@ -97,7 +98,7 @@ export function applyDashboardFilters(
 
 export function getUniqueExamDays(installations: InstallationRecord[], examDates: ExamDateDetail[]): string[] {
   const ids = new Set(installations.map(i => i.id));
-  const allDates = examDates.filter(d => ids.has(d.installationRecordId)).map(d => d.examDate);
+  const allDates = examDates.filter(d => ids.has(d.installationRecordId)).map(d => normalizeExamDate(d.examDate) || d.examDate);
   return [...new Set(allDates)];
 }
 

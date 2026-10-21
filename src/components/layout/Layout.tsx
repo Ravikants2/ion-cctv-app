@@ -77,19 +77,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </span>
           </div>
 
-          {/* Centre: desktop nav */}
-          <nav className="hidden md:flex items-center gap-1 flex-1 justify-center" aria-label="Main navigation">
-            {visibleNavItems.map(item => (
-              <NavLink key={item.to} to={item.to}
-                className={({ isActive }) => clsx(
-                  'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap',
-                  isActive ? 'bg-white/15 text-white shadow-inner ring-1 ring-white/10' : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
-                )}>
-                <item.icon size={13} />{item.label}
-              </NavLink>
-            ))}
-          </nav>
-
           {/* Right: sync + user menu */}
           <div className="flex items-center gap-2 shrink-0">
             <SyncIcon />
@@ -140,6 +127,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
               )}
             </div>
           </div>
+        </div>
+
+        <div className="hidden border-t border-white/10 bg-slate-900/80 md:block">
+          <nav className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-1.5 px-4 py-2" aria-label="Main navigation">
+            {visibleNavItems.map(item => (
+              <NavLink key={item.to} to={item.to} end
+                className={({ isActive }) => clsx(
+                  'flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors',
+                  isActive
+                    ? 'border-sky-300/40 bg-sky-400/15 text-sky-100 shadow-sm'
+                    : 'border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.08] hover:text-white'
+                )}>
+                <item.icon size={14} />{item.label}
+              </NavLink>
+            ))}
+          </nav>
         </div>
 
         {/* Mobile nav */}
