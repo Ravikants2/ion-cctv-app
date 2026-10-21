@@ -1,6 +1,7 @@
 import React, { Children, cloneElement, isValidElement, useMemo, useState } from 'react';
 
 type SortDirection = 'asc' | 'desc';
+export type TableSort = { column: number; direction: SortDirection } | null;
 type TableElement = React.ReactElement<{ children?: React.ReactNode; [key: string]: unknown }>;
 
 function textContent(node: React.ReactNode): string {
@@ -88,8 +89,17 @@ function sortedRows(
   });
 }
 
-export function SortableTable({ children, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
-  const [sort, setSort] = useState<{ column: number; direction: SortDirection } | null>(null);
+export function SortableTable({
+  children,
+  sort: controlledSort,
+  onSortChange,
+  ...props
+}: React.TableHTMLAttributes<HTMLTableElement> & {
+  sort?: TableSort;
+  onSortChange?: (sort: TableSort) => void;
+}) {
+  const [internalSort, setInternalSort] = useState<TableSort>(null);
+  const sort = controlledSort === undefined ? internalSort : controlledSort;
   const tableChildren = useMemo(() => Children.map(children, child => {
     if (!isValidElement<{ children?: React.ReactNode }>(child)) return child;
     if (child.type === 'thead') {
@@ -101,18 +111,24 @@ export function SortableTable({ children, ...props }: React.TableHTMLAttributes<
             children: Children.map(row.props.children, cell => {
               const currentColumn = column++;
               return sortableHeaders(cell, currentColumn, sort?.column ?? null, sort?.direction ?? 'asc', selected => {
-                setSort(previous => ({
+                const nextSort: TableSort = {
                   column: selected,
-                  direction: previous?.column === selected && previous.direction === 'asc' ? 'desc' : 'asc',
-                }));
+                  direction: sort?.column === selected && sort?.direction === 'asc' ? 'desc' : 'asc',
+                };
+                if (onSortChange) onSortChange(nextSort);
+                else setInternalSort(nextSort);
               });
             }),
           });
         }),
       });
     }
-    return sortedRows(child, sort?.column ?? null, sort?.direction ?? 'asc');
-  }), [children, sort]);
+    return sortedRows(
+      child,
+      controlledSort === undefined ? sort?.column ?? null : null,
+      sort?.direction ?? 'asc'
+    );
+  }), [children, controlledSort, onSortChange, sort]);
 
   return <table {...props}>{tableChildren}</table>;
 }

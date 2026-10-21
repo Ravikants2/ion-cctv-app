@@ -3,6 +3,7 @@ import {
   getInstallationStats,
   getDashboardKPIs,
   applyDashboardFilters,
+  getRequirementCompletion,
   getUniqueExamDays,
   safeDiv,
   formatINR,
@@ -135,6 +136,37 @@ describe('applyDashboardFilters', () => {
     // Only inst1 has a date on 2024-03-02
     expect(result.length).toBe(1);
     expect(result[0].id).toBe('i1');
+  });
+});
+
+describe('getRequirementCompletion', () => {
+  const emptyFilters: DashboardFilters = { startDate: '', endDate: '', client: '', exam: '', zone: '' };
+
+  it('counts one TC code and exam as complete when any installation exists, regardless of exam date range', () => {
+    const duplicateRequirement = { ...req1, id: 'r1-duplicate', tcCode: ' tc001 ' };
+    const completion = getRequirementCompletion(
+      [req1, duplicateRequirement, req2],
+      [inst1],
+      { ...emptyFilters, startDate: '2024-03-02', endDate: '2024-03-02' }
+    );
+
+    expect(completion.requirements).toHaveLength(3);
+    expect(completion.completed).toHaveLength(2);
+    expect(completion.completed[0].tcCode).toBe('TC001');
+    expect(completion.pending.map(requirement => requirement.id)).toEqual(['r2']);
+  });
+
+  it('matches installations to the same client, exam, and TC code rather than requirement ID only', () => {
+    const updatedRequirement = { ...req1, id: 'r1-updated' };
+    const completion = getRequirementCompletion(
+      [req1, updatedRequirement],
+      [inst1],
+      emptyFilters
+    );
+
+    expect(completion.requirements).toHaveLength(2);
+    expect(completion.completed).toHaveLength(2);
+    expect(completion.pending).toHaveLength(0);
   });
 });
 

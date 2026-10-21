@@ -96,6 +96,36 @@ export function applyDashboardFilters(
   });
 }
 
+export function getRequirementCompletion(
+  requirements: RequirementMaster[],
+  installations: InstallationRecord[],
+  filters: DashboardFilters
+) {
+  const requirementById = new Map(requirements.map(requirement => [requirement.id, requirement]));
+  const requirementKey = (requirement: RequirementMaster) => [
+    requirement.clientName,
+    requirement.examName,
+    requirement.tcCode,
+  ].map(value => value.trim().toLocaleLowerCase()).join('\u0000');
+
+  const scopedRequirements = requirements.filter(requirement => {
+    if (
+      (filters.client && requirement.clientName !== filters.client) ||
+      (filters.exam && requirement.examName !== filters.exam) ||
+      (filters.zone && requirement.zone !== filters.zone)
+    ) return false;
+    return true;
+  });
+
+  const installedKeys = new Set(installations.flatMap(installation => {
+    const requirement = requirementById.get(installation.requirementId);
+    return requirement ? [requirementKey(requirement)] : [];
+  }));
+  const completed = scopedRequirements.filter(requirement => installedKeys.has(requirementKey(requirement)));
+  const pending = scopedRequirements.filter(requirement => !installedKeys.has(requirementKey(requirement)));
+  return { requirements: scopedRequirements, completed, pending };
+}
+
 export function getUniqueExamDays(installations: InstallationRecord[], examDates: ExamDateDetail[]): string[] {
   const ids = new Set(installations.map(i => i.id));
   const allDates = examDates.filter(d => ids.has(d.installationRecordId)).map(d => normalizeExamDate(d.examDate) || d.examDate);

@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
 import { KPICard, Badge } from '../../components/ui/index';
-import { applyDashboardFilters, getInstallationStats } from '../../utils/calculations';
+import { applyDashboardFilters, getInstallationStats, getRequirementCompletion } from '../../utils/calculations';
 import { CheckCircle, Clock, FileText, AlertTriangle, Pencil } from 'lucide-react';
 import { CostValue } from '../../components/ui/CostValue';
 import { TablePagination } from '../../components/ui/TablePagination';
@@ -22,16 +22,10 @@ export default function OperationsDashboard() {
   const [attentionPage, setAttentionPage] = useState(1);
 
   const filtered = applyDashboardFilters(data.installations, data.requirements, data.examDates, filters);
-  const allReqs = data.requirements.filter(r => {
-    if (filters.client && r.clientName !== filters.client) return false;
-    if (filters.exam && r.examName !== filters.exam) return false;
-    if (filters.zone && r.zone !== filters.zone) return false;
-    return true;
-  });
-
-  const completedIds = new Set(filtered.map(i => i.requirementId));
-  const pending = allReqs.filter(r => !completedIds.has(r.id));
-  const completionPct = allReqs.length > 0 ? Math.round((completedIds.size / allReqs.length) * 100) : 0;
+  const completion = getRequirementCompletion(data.requirements, data.installations, filters);
+  const allReqs = completion.requirements;
+  const pending = completion.pending;
+  const completionPct = allReqs.length > 0 ? Math.round((completion.completed.length / allReqs.length) * 100) : 0;
 
   const withQuotation = filtered.filter(i => i.quotationFileId).length;
   const withoutQuotation = filtered.length - withQuotation;
@@ -113,7 +107,7 @@ export default function OperationsDashboard() {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <KPICard title="Required Venues" value={allReqs.length} icon={<CheckCircle size={20} />} color="blue" />
-        <KPICard title="Completed" value={completedIds.size} icon={<CheckCircle size={20} />} color="green" />
+        <KPICard title="Completed" value={completion.completed.length} icon={<CheckCircle size={20} />} color="green" />
         <KPICard title="Pending" value={pending.length} icon={<Clock size={20} />} color="orange" onClick={() => setKpiDetail('pending')} />
         <KPICard title="Completion %" value={`${completionPct}%`} icon={<CheckCircle size={20} />} color="teal" />
         <KPICard title="Quotation Available" value={withQuotation} icon={<FileText size={20} />} color="green" />

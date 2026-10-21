@@ -5,6 +5,7 @@ import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
 import { Button } from '../../components/ui/Button';
 import { SortableTable } from '../../components/ui/SortableTable';
+import type { TableSort } from '../../components/ui/SortableTable';
 import { CostValue } from '../../components/ui/CostValue';
 import { applyDashboardFilters, safeDiv } from '../../utils/calculations';
 import { TablePagination } from '../../components/ui/TablePagination';
@@ -37,6 +38,7 @@ export default function VenueDashboard() {
   const [page, setPage] = useState(1);
   const [detailPage, setDetailPage] = useState(1);
   const [selectedDays, setSelectedDays] = useState<number[]>([]);
+  const [venueSort, setVenueSort] = useState<TableSort>(null);
   const filtered = applyDashboardFilters(data.installations, data.requirements, data.examDates, filters);
 
   const groups = new Map<string, VenueSummary>();
@@ -84,11 +86,26 @@ export default function VenueDashboard() {
   const venues = selectedDays.length
     ? allVenues.filter(venue => selectedDays.includes(venue.days))
     : allVenues;
+  const sortedVenues = venueSort
+    ? [...venues].sort((left, right) => {
+      const leftValues = [left.zone, left.state, left.tcCode, left.tcName, left.days, left.candidates, left.cameras, left.cost, left.perCandidate, left.vendors.length];
+      const rightValues = [right.zone, right.state, right.tcCode, right.tcName, right.days, right.candidates, right.cameras, right.cost, right.perCandidate, right.vendors.length];
+      const leftValue = leftValues[venueSort.column];
+      const rightValue = rightValues[venueSort.column];
+      const result = typeof leftValue === 'number' && typeof rightValue === 'number'
+        ? leftValue - rightValue
+        : String(leftValue ?? '').localeCompare(String(rightValue ?? ''), undefined, { numeric: true, sensitivity: 'base' });
+      return venueSort.direction === 'asc' ? result : -result;
+    })
+    : venues;
   const totalCandidates = venues.reduce((total, venue) => total + venue.candidates, 0);
   const totalCost = venues.reduce((total, venue) => total + venue.cost, 0);
   const totalCameras = venues.reduce((total, venue) => total + venue.cameras, 0);
   const totalVendors = new Set(venues.flatMap(venue => venue.vendors)).size;
-  const totalDays = venues.reduce((total, venue) => total + venue.days, 0);
+  const totalDays = new Set(venues.flatMap(venue => venue.installations.flatMap(installation =>
+    data.examDates.filter(row => row.installationRecordId === installation.id)
+      .map(row => normalizeExamDate(row.examDate) || row.examDate)
+  ))).size;
   const zoneSummaries = Array.from(venues.reduce((zones, venue) => {
     const zone = zones.get(venue.zone) || { zone: venue.zone, venues: 0, candidates: 0, cameras: 0, cost: 0, vendors: new Set<string>() };
     zone.venues++;
@@ -105,7 +122,7 @@ export default function VenueDashboard() {
     .sort((left, right) => right.perCandidate - left.perCandidate).slice(0, 10);
 
   const currentPage = Math.min(page, Math.max(1, Math.ceil(venues.length / PAGE_SIZE)));
-  const pageRows = venues.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const pageRows = sortedVenues.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const selectedVenue = selected ? venues.find(venue => venue.key === selected.key) : undefined;
   const detailPageCount = selectedVenue ? Math.max(1, Math.ceil(selectedVenue.installations.length / PAGE_SIZE)) : 1;
   const currentDetailPage = Math.min(detailPage, detailPageCount);
@@ -273,7 +290,7 @@ export default function VenueDashboard() {
         )}
       </section>
       <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
-        <SortableTable className="w-full text-sm">
+        <SortableTable className="w-full text-sm" sort={venueSort} onSortChange={sort => { setVenueSort(sort); setPage(1); }}>
           <thead><tr className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-600">
             {['Zone', 'State', 'TC Code', 'TC Name', 'Temporary CCTV Days', 'Scheduled Candidates', 'Camera Count', 'Cost Incurred', 'Cost per Candidate', 'Vendors'].map(heading => (
               <th key={heading} className="whitespace-nowrap px-3 py-3">{heading}</th>
