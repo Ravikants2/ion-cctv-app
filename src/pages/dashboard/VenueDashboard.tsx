@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { SortableTable } from '../../components/ui/SortableTable';
 import type { TableSort } from '../../components/ui/SortableTable';
 import { CostValue } from '../../components/ui/CostValue';
-import { applyDashboardFilters, safeDiv } from '../../utils/calculations';
+import { applyDashboardFilters, getPhysicalVenueKey, safeDiv } from '../../utils/calculations';
 import { TablePagination } from '../../components/ui/TablePagination';
 import { ArrowLeft, ChevronDown, ChevronUp, Filter, X } from 'lucide-react';
 import { formatExamDate, normalizeExamDate } from '../../utils/dates';
@@ -45,7 +45,7 @@ export default function VenueDashboard() {
   filtered.forEach(installation => {
     const requirement = data.requirements.find(row => row.id === installation.requirementId);
     if (!requirement) return;
-    const key = JSON.stringify([requirement.zone, requirement.state, requirement.tcCode, requirement.tcName]);
+    const key = getPhysicalVenueKey(requirement);
     let venue = groups.get(key);
     if (!venue) {
       venue = {

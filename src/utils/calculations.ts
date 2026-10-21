@@ -116,14 +116,28 @@ export function getRequirementCompletion(
     ) return false;
     return true;
   });
+  const uniqueRequirementsByKey = new Map<string, RequirementMaster>();
+  scopedRequirements.forEach(requirement => {
+    const key = requirementKey(requirement);
+    if (!uniqueRequirementsByKey.has(key)) uniqueRequirementsByKey.set(key, requirement);
+  });
+  const uniqueRequirements = [...uniqueRequirementsByKey.values()];
 
   const installedKeys = new Set(installations.flatMap(installation => {
     const requirement = requirementById.get(installation.requirementId);
     return requirement ? [requirementKey(requirement)] : [];
   }));
-  const completed = scopedRequirements.filter(requirement => installedKeys.has(requirementKey(requirement)));
-  const pending = scopedRequirements.filter(requirement => !installedKeys.has(requirementKey(requirement)));
-  return { requirements: scopedRequirements, completed, pending };
+  const completed = uniqueRequirements.filter(requirement => installedKeys.has(requirementKey(requirement)));
+  const pending = uniqueRequirements.filter(requirement => !installedKeys.has(requirementKey(requirement)));
+  return { requirements: uniqueRequirements, completed, pending };
+}
+
+export function getPhysicalVenueKey(requirement: Pick<RequirementMaster, 'zone' | 'state' | 'tcCode'>): string {
+  return JSON.stringify([
+    requirement.zone.trim().toLocaleLowerCase(),
+    requirement.state.trim().toLocaleLowerCase(),
+    requirement.tcCode.trim().toLocaleLowerCase(),
+  ]);
 }
 
 export function getUniqueExamDays(installations: InstallationRecord[], examDates: ExamDateDetail[]): string[] {

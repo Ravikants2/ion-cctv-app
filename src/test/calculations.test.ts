@@ -4,6 +4,7 @@ import {
   getDashboardKPIs,
   applyDashboardFilters,
   getRequirementCompletion,
+  getPhysicalVenueKey,
   getUniqueExamDays,
   safeDiv,
   formatINR,
@@ -150,8 +151,8 @@ describe('getRequirementCompletion', () => {
       { ...emptyFilters, startDate: '2024-03-02', endDate: '2024-03-02' }
     );
 
-    expect(completion.requirements).toHaveLength(3);
-    expect(completion.completed).toHaveLength(2);
+    expect(completion.requirements).toHaveLength(2);
+    expect(completion.completed).toHaveLength(1);
     expect(completion.completed[0].tcCode).toBe('TC001');
     expect(completion.pending.map(requirement => requirement.id)).toEqual(['r2']);
   });
@@ -164,9 +165,17 @@ describe('getRequirementCompletion', () => {
       emptyFilters
     );
 
-    expect(completion.requirements).toHaveLength(2);
-    expect(completion.completed).toHaveLength(2);
+    expect(completion.requirements).toHaveLength(1);
+    expect(completion.completed).toHaveLength(1);
     expect(completion.pending).toHaveLength(0);
+  });
+});
+
+describe('getPhysicalVenueKey', () => {
+  it('treats a TC code as the venue identity when its name differs across exams', () => {
+    const renamedVenue = { ...req1, tcName: 'Another display name' };
+    expect(getPhysicalVenueKey(req1)).toBe(getPhysicalVenueKey(renamedVenue));
+    expect(getPhysicalVenueKey(req1)).not.toBe(getPhysicalVenueKey({ ...req1, tcCode: 'TC999' }));
   });
 });
 
