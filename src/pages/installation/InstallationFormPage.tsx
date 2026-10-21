@@ -8,6 +8,7 @@ import { Alert } from '../../components/ui/index';
 import type { InstallationRecord, ExamDateDetail, InstallationType, StorageType, StorageUnit } from '../../types';
 import { Plus, Trash2, FileText, Eye } from 'lucide-react';
 import { normalizeExamDate } from '../../utils/dates';
+import { sameZone } from '../../utils/vendorCode';
 
 interface ExamDateRow {
   id: string;
@@ -81,7 +82,7 @@ export default function InstallationFormPage() {
   const exams = [...new Set(data.requirements.filter(r => !selectedClient || r.clientName === selectedClient).map(r => r.examName))].sort();
   const venues = data.requirements.filter(r => r.clientName === selectedClient && r.examName === selectedExam);
   const selectedReq = data.requirements.find(r => r.id === selectedReqId);
-  const zoneVendors = data.vendors.filter(v => v.zone === selectedReq?.zone);
+  const zoneVendors = data.vendors.filter(v => selectedReq && sameZone(v.zone, selectedReq.zone));
 
   // Duplicate check on venue selection
   const handleVenueSelect = (reqId: string) => {

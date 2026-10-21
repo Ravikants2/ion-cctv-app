@@ -1,5 +1,13 @@
 import type { VendorMaster } from '../types';
 
+export function sameZone(left: string, right: string): boolean {
+  return left.trim().localeCompare(right.trim(), undefined, { sensitivity: 'accent' }) === 0;
+}
+
+export function sameVendorName(left: string, right: string): boolean {
+  return left.trim().localeCompare(right.trim(), undefined, { sensitivity: 'accent' }) === 0;
+}
+
 export function isVendorCodeForZone(code: string, zone: string): boolean {
   const prefix = zone.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`^${prefix}-\\d{5}$`, 'i').test(code.trim());

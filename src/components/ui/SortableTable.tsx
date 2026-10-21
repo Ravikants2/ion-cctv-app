@@ -23,6 +23,15 @@ function compareCells(left: string, right: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 }
 
+function flattenFragments(nodes: React.ReactNode): React.ReactNode[] {
+  return Children.toArray(nodes).flatMap(node => {
+    if (isValidElement(node) && node.type === React.Fragment) {
+      return flattenFragments((node.props as { children?: React.ReactNode }).children);
+    }
+    return [node];
+  });
+}
+
 function sortableHeaders(
   node: React.ReactNode,
   column: number,
@@ -62,10 +71,10 @@ function sortedRows(
 ): React.ReactNode {
   if (!isValidElement<{ children?: React.ReactNode }>(node)) return node;
   if (node.type === 'tbody' && activeColumn !== null) {
-    const rows = Children.toArray(node.props.children).filter(isValidElement);
+    const rows = flattenFragments(node.props.children).filter(isValidElement);
     const sorted = [...rows].sort((left, right) => {
-      const leftCells = Children.toArray((left.props as { children?: React.ReactNode }).children);
-      const rightCells = Children.toArray((right.props as { children?: React.ReactNode }).children);
+      const leftCells = flattenFragments((left.props as { children?: React.ReactNode }).children);
+      const rightCells = flattenFragments((right.props as { children?: React.ReactNode }).children);
       const result = compareCells(
         textContent((leftCells[activeColumn] as TableElement | undefined)?.props.children),
         textContent((rightCells[activeColumn] as TableElement | undefined)?.props.children)

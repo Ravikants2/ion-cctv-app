@@ -8,7 +8,7 @@ import { SortableTable } from '../../components/ui/SortableTable';
 import { CostValue } from '../../components/ui/CostValue';
 import { applyDashboardFilters, safeDiv } from '../../utils/calculations';
 import { TablePagination } from '../../components/ui/TablePagination';
-import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, Filter, X } from 'lucide-react';
 import { formatExamDate, normalizeExamDate } from '../../utils/dates';
 import { getVendorCode } from '../../utils/vendorCode';
 
@@ -36,6 +36,7 @@ export default function VenueDashboard() {
   const [selected, setSelected] = useState<{ key: string; metric: VenueMetric } | null>(null);
   const [page, setPage] = useState(1);
   const [detailPage, setDetailPage] = useState(1);
+  const [selectedDays, setSelectedDays] = useState<number[]>([]);
   const filtered = applyDashboardFilters(data.installations, data.requirements, data.examDates, filters);
 
   const groups = new Map<string, VenueSummary>();
@@ -63,7 +64,7 @@ export default function VenueDashboard() {
     }
     venue.installations.push(installation);
   });
-  const venues = Array.from(groups.values()).map(venue => {
+  const allVenues = Array.from(groups.values()).map(venue => {
     const installationIds = new Set(venue.installations.map(row => row.id));
     const schedule = data.examDates.filter(row => installationIds.has(row.installationRecordId));
     const candidates = schedule.reduce((total, row) => total + row.scheduledCandidates, 0);
@@ -79,6 +80,10 @@ export default function VenueDashboard() {
       vendors: vendorIds,
     };
   }).sort((left, right) => left.zone.localeCompare(right.zone) || left.state.localeCompare(right.state) || left.tcCode.localeCompare(right.tcCode));
+  const dayOptions = [...new Set(allVenues.map(venue => venue.days))].sort((left, right) => left - right);
+  const venues = selectedDays.length
+    ? allVenues.filter(venue => selectedDays.includes(venue.days))
+    : allVenues;
   const totalCandidates = venues.reduce((total, venue) => total + venue.candidates, 0);
   const totalCost = venues.reduce((total, venue) => total + venue.cost, 0);
   const totalCameras = venues.reduce((total, venue) => total + venue.cameras, 0);
@@ -231,6 +236,42 @@ export default function VenueDashboard() {
           </div>
         ))}
       </div>
+      <section className="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="Venue filters">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Filter size={16} className="text-blue-700" />
+            <h2 className="text-sm font-semibold text-slate-800">Temporary CCTV days</h2>
+            <span className="text-xs text-slate-500">Select one or more day counts</span>
+          </div>
+          {selectedDays.length > 0 && (
+            <button type="button" className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline"
+              onClick={() => { setSelectedDays([]); setPage(1); }}>
+              <X size={13} /> Clear filter
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {dayOptions.map(days => (
+            <label key={days} className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+              selectedDays.includes(days) ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+            }`}>
+              <input type="checkbox" checked={selectedDays.includes(days)}
+                onChange={event => {
+                  setSelectedDays(previous => event.target.checked
+                    ? [...previous, days].sort((left, right) => left - right)
+                    : previous.filter(value => value !== days));
+                  setPage(1);
+                }}
+                className="accent-blue-700" />
+              {days} {days === 1 ? 'day' : 'days'}
+            </label>
+          ))}
+          {dayOptions.length === 0 && <p className="text-sm text-slate-500">No CCTV day data is available for the selected dashboard filters.</p>}
+        </div>
+        {selectedDays.length > 0 && (
+          <p className="mt-2 text-xs text-slate-500">{venues.length} venues match the selected day counts.</p>
+        )}
+      </section>
       <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
         <SortableTable className="w-full text-sm">
           <thead><tr className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-600">

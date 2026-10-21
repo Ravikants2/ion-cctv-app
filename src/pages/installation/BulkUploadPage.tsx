@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { SortableTable } from '../../components/ui/SortableTable';
 import { formatExamDate, normalizeExamDate } from '../../utils/dates';
+import { sameVendorName, sameZone } from '../../utils/vendorCode';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -41,7 +42,7 @@ export default function BulkUploadPage() {
         else row.examDate = normalizeExamDate(row.examDate)!;
         if (row.scheduledCandidates < 0) errors.push('Negative candidates');
         if (!['Full Vendor', 'Partial Vendor'].includes(row.installationType)) errors.push('Invalid installation type');
-        const vendor = req ? data.vendors.find(v => v.zone === req.zone && v.vendorName === row.vendorName) : undefined;
+        const vendor = req ? data.vendors.find(v => sameZone(v.zone, req.zone) && sameVendorName(v.vendorName, row.vendorName)) : undefined;
         if (req && !vendor) errors.push(`Vendor "${row.vendorName}" not approved for zone ${req.zone}`);
         if (row.localVendorCost < 0) errors.push('Negative cost');
         if (row.cameraCount < 0) errors.push('Negative camera count');

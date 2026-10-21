@@ -9,7 +9,7 @@ import { downloadTemplate, exportVendorsToExcel, parseVendorFile } from '../../u
 import type { VendorMaster } from '../../types';
 import { Download, Upload, Trash2, Plus } from 'lucide-react';
 import { TablePagination } from '../../components/ui/TablePagination';
-import { createVendorCode, getVendorCode, isVendorCodeForZone } from '../../utils/vendorCode';
+import { createVendorCode, getVendorCode, isVendorCodeForZone, sameVendorName, sameZone } from '../../utils/vendorCode';
 
 const PAGE_SIZE = 10;
 
@@ -27,6 +27,7 @@ export default function VendorsPage() {
   const [page, setPage] = useState(1);
 
   const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
+  const knownZones = [...new Set([...zones, ...data.vendors.map(vendor => vendor.zone)])];
 
   const filtered = data.vendors.filter(v => {
     if (filterZone && v.zone !== filterZone) return false;
@@ -47,35 +48,43 @@ export default function VendorsPage() {
       const importedVendorCodes = new Set<string>();
       const previewRows = rows.map(row => {
         if (!row.zone || !row.vendorName) return { ...row, status: 'ERROR' as const, error: 'Missing fields' };
+        const canonicalZone = knownZones.find(zone => sameZone(zone, row.zone!));
+        if (!canonicalZone) {
+          return { ...row, status: 'ERROR' as const, error: 'Zone must match an existing zone name' };
+        }
+        const normalizedRow = { ...row, zone: canonicalZone, vendorName: row.vendorName.trim() };
         const normalizedCode = row.vendorCode?.trim().toLowerCase();
-        if (row.vendorCode && !isVendorCodeForZone(row.vendorCode, row.zone)) {
-          return { ...row, status: 'ERROR' as const, error: 'Vendor ID must match Zone Name-12345' };
+        if (row.vendorCode && !isVendorCodeForZone(row.vendorCode, canonicalZone)) {
+          return { ...normalizedRow, status: 'ERROR' as const, error: 'Vendor ID must match Zone Name-12345' };
         }
         if (normalizedCode && importedVendorCodes.has(normalizedCode)) {
-          return { ...row, status: 'ERROR' as const, error: 'Vendor ID appears more than once in the file' };
+          return { ...normalizedRow, status: 'ERROR' as const, error: 'Vendor ID appears more than once in the file' };
         }
         if (normalizedCode) importedVendorCodes.add(normalizedCode);
         const existing = data.vendors.find(v =>
           (normalizedCode && getVendorCode(v).toLowerCase() === normalizedCode) ||
-          (v.zone === row.zone && v.vendorName === row.vendorName)
+          (sameZone(v.zone, canonicalZone) && sameVendorName(v.vendorName, normalizedRow.vendorName!))
         );
         const duplicateCode = row.vendorCode && data.vendors.some(v =>
           getVendorCode(v).toLowerCase() === normalizedCode && v.id !== existing?.id
         );
-        if (duplicateCode) return { ...row, status: 'ERROR' as const, error: 'Vendor ID already belongs to another vendor' };
-        let vendorCode = row.vendorCode || (existing ? getVendorCode(existing) : createVendorCode(row.zone, data.vendors));
+        if (duplicateCode) return { ...normalizedRow, status: 'ERROR' as const, error: 'Vendor ID already belongs to another vendor' };
+        const vendorCodeParts = row.vendorCode?.trim().split('-') || [];
+        let vendorCode = row.vendorCode
+          ? `${canonicalZone}-${vendorCodeParts[vendorCodeParts.length - 1]}`
+          : (existing ? getVendorCode(existing) : createVendorCode(canonicalZone, data.vendors));
         if (!normalizedCode && !existing) {
           while (importedVendorCodes.has(vendorCode.toLowerCase())) {
-            vendorCode = createVendorCode(row.zone, data.vendors);
+            vendorCode = createVendorCode(canonicalZone, data.vendors);
           }
         }
         const finalCode = vendorCode.toLowerCase();
         if (!normalizedCode && importedVendorCodes.has(finalCode)) {
-          return { ...row, status: 'ERROR' as const, error: 'Generated Vendor ID conflicts with another row; retry the upload' };
+          return { ...normalizedRow, status: 'ERROR' as const, error: 'Generated Vendor ID conflicts with another row; retry the upload' };
         }
         importedVendorCodes.add(finalCode);
         return {
-          ...row,
+          ...normalizedRow,
           vendorCode,
           id: existing?.id,
           status: existing ? 'UPDATE' as const : 'NEW' as const,
@@ -129,7 +138,7 @@ export default function VendorsPage() {
       setFormError('Vendor ID must use the selected zone followed by a hyphen and five digits.');
       return;
     }
-    const dup = data.vendors.find(v => v.zone === form.zone && v.vendorName === form.vendorName);
+    const dup = data.vendors.find(v => sameZone(v.zone, form.zone) && sameVendorName(v.vendorName, form.vendorName));
     if (dup) { setFormError('Duplicate: Zone + Vendor Name already exists.'); return; }
     if (data.vendors.some(v => getVendorCode(v).toLowerCase() === vendorCode.toLowerCase())) {
       setFormError('Vendor ID already exists.');

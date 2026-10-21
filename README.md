@@ -90,7 +90,8 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 - Excel/PDF export controls on app pages
 - Requirement Master upload (CSV/XLSX template)
 - Zone-wise Vendor Master upload/download with round-trippable `Zone-12345` Vendor IDs
-- Venue analysis with camera counts, hover details, top-cost rankings, and zone comparisons
+- Venue analysis with multi-select temporary CCTV day filters, camera counts, hover details, top-cost rankings, and zone comparisons
+- Case-insensitive vendor and zone matching for vendor setup and imports
 - Super Admin user management: create/delete users, change roles, and change passwords
 - Installation Record (single entry + bulk upload)
 - Exam date-wise candidate tracking

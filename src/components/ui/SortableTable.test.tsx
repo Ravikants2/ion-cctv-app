@@ -22,4 +22,24 @@ describe('SortableTable', () => {
     fireEvent.click(screen.getByRole('button', { name: /Count/ }));
     expect(getNames()).toEqual(['Venue 10', 'Venue 2']);
   });
+
+  it('sorts numeric cells when table rows contain fragments', () => {
+    render(
+      <SortableTable>
+        <thead><tr><th>Temporary CCTV Days</th><th>Venue</th></tr></thead>
+        <tbody>
+          {[12, 2, 5].map(days => (
+            <tr key={days}>{<>
+              <td><button>{days}</button><span aria-hidden="true">↓</span></td>
+              <td>Venue {days}</td>
+            </>}</tr>
+          ))}
+        </tbody>
+      </SortableTable>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Temporary CCTV Days/ }));
+    const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
+    expect(rows.map(row => within(row).getAllByRole('cell')[0].textContent)).toEqual(['2↓', '5↓', '12↓']);
+  });
 });
