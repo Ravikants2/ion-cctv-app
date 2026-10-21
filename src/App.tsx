@@ -14,7 +14,9 @@ import ExecutiveDashboard from './pages/dashboard/ExecutiveDashboard';
 import FinancialDashboard from './pages/dashboard/FinancialDashboard';
 import OperationsDashboard from './pages/dashboard/OperationsDashboard';
 import VendorDashboard from './pages/dashboard/VendorDashboard';
+import VenueDashboard from './pages/dashboard/VenueDashboard';
 import ChatPage from './pages/chat/ChatPage';
+import UserManagementPage from './pages/users/UserManagementPage';
 
 function ProtectedRoute({ children, viewerAllowed = false }: { children: React.ReactNode; viewerAllowed?: boolean }) {
   const { currentUser, syncStatus } = useAuth();
@@ -52,10 +54,12 @@ function AppRoutes() {
       <Route path="/dashboard/financial"  element={<ProtectedRoute viewerAllowed><FinancialDashboard /></ProtectedRoute>} />
       <Route path="/dashboard/operations" element={<ProtectedRoute viewerAllowed><OperationsDashboard /></ProtectedRoute>} />
       <Route path="/dashboard/vendor"     element={<ProtectedRoute><VendorDashboard /></ProtectedRoute>} />
+      <Route path="/dashboard/venue"      element={<ProtectedRoute viewerAllowed><VenueDashboard /></ProtectedRoute>} />
       <Route path="/requirements"         element={<ProtectedRoute><RequirementsPage /></ProtectedRoute>} />
       <Route path="/vendors"              element={<ProtectedRoute viewerAllowed><VendorsPage /></ProtectedRoute>} />
       <Route path="/records"              element={<ProtectedRoute><RecordsPage /></ProtectedRoute>} />
       <Route path="/chat"                 element={<ProtectedRoute viewerAllowed><ChatPage /></ProtectedRoute>} />
+      <Route path="/users"                element={<ProtectedRoute><UserManagementPage /></ProtectedRoute>} />
       <Route path="/installation/new"     element={<ProtectedRoute><InstallationFormPage /></ProtectedRoute>} />
       <Route path="/installation/edit/:id" element={<ProtectedRoute><InstallationFormPage /></ProtectedRoute>} />
       <Route path="/installation/bulk"    element={<ProtectedRoute><BulkUploadPage /></ProtectedRoute>} />

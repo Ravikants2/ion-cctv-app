@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
@@ -66,7 +67,7 @@ export default function OperationsDashboard() {
         <button onClick={() => setKpiDetail(null)} className="text-blue-600 hover:underline text-sm mb-4 block">← Back to Dashboard</button>
         <h2 className="text-lg font-bold mb-4 capitalize">{kpiDetail} Details</h2>
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50 border-b">
               {['Client','Exam','Zone','State','City','TC Code','TC Name','Actions'].map(h => (
                 <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -92,7 +93,7 @@ export default function OperationsDashboard() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={items.length} onPageChange={setDetailPage} />
         </div>
       </div>
@@ -115,7 +116,7 @@ export default function OperationsDashboard() {
 
       <div className="bg-white border rounded-xl shadow-sm overflow-x-auto mb-6">
         <div className="px-4 py-3 border-b font-semibold text-gray-800">Installation Type Comparison</div>
-        <table className="w-full text-sm">
+        <SortableTable className="w-full text-sm">
           <thead><tr className="bg-gray-50">
             {['Type','Venues','Candidates','Cameras','Total Cost','Per Candidate'].map(h => (
               <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -136,7 +137,7 @@ export default function OperationsDashboard() {
               );
             })}
           </tbody>
-        </table>
+        </SortableTable>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
@@ -150,7 +151,7 @@ export default function OperationsDashboard() {
       {pending.length > 0 && (
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto mb-6">
           <div className="px-4 py-3 border-b font-semibold text-gray-800">Pending Requirements ({pending.length})</div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50">
               {['Client','Exam','Zone','State','City','TC Code','TC Name'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -172,7 +173,7 @@ export default function OperationsDashboard() {
                 <tr><td colSpan={7} className="px-3 py-2 text-center text-blue-600 cursor-pointer hover:underline text-xs" onClick={() => setKpiDetail('pending')}>View all {pending.length} pending…</td></tr>
               )}
             </tbody>
-          </table>
+          </SortableTable>
         </div>
       )}
 
@@ -181,7 +182,7 @@ export default function OperationsDashboard() {
           <div className="px-4 py-3 border-b font-semibold text-gray-800 flex items-center gap-2">
             <AlertTriangle size={16} className="text-yellow-500" /> Attention Required ({attentionItems.length})
           </div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50">
               {['TC Code','TC Name','Issues','Actions'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -217,7 +218,7 @@ export default function OperationsDashboard() {
                 );
               })}
             </tbody>
-          </table>
+          </SortableTable>
         </div>
       )}
     </div>

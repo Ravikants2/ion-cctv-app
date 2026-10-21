@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -209,7 +210,7 @@ export default function RequirementsPage() {
             <span className="text-red-700">Errors: {preview.filter(r => r.status === 'ERROR').length}</span>
           </div>
           <div className="overflow-x-auto max-h-64">
-            <table className="w-full text-xs">
+            <SortableTable className="w-full text-xs">
               <thead><tr className="bg-gray-50">{['Status','Zone','State','City','TC Code','TC Name','Client','Exam','Error'].map(h => <th key={h} className="px-2 py-1 text-left font-medium text-gray-600">{h}</th>)}</tr></thead>
               <tbody>
                 {preview.map((r, i) => (
@@ -222,7 +223,7 @@ export default function RequirementsPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </SortableTable>
           </div>
           <div className="flex gap-2 mt-3">
             <Button size="sm" onClick={confirmImport} disabled={preview.every(r => r.status === 'ERROR')}>Confirm Import</Button>
@@ -234,7 +235,7 @@ export default function RequirementsPage() {
       {/* Table */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <SortableTable className="w-full text-sm">
           <thead><tr className="bg-gray-50 border-b">
             {['Client Name','Exam Name','Zone','State','City','TC Code','TC Name','Actions'].map(h => (
               <th key={h} className="whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
@@ -262,7 +263,7 @@ export default function RequirementsPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </SortableTable>
         </div>
         <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setPage} />
       </div>

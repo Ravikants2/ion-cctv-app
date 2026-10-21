@@ -14,7 +14,7 @@ const LOCAL_KEY  = 'ion_cctv_data';
 const LOCAL_SHA  = 'ion_cctv_sha';
 
 // ─── Password hashing (demo-safe deterministic hash) ─────────────────────────
-function hashPassword(password: string): string {
+export function hashPassword(password: string): string {
   let hash = 0;
   for (let i = 0; i < password.length; i++) {
     hash = (hash << 5) - hash + password.charCodeAt(i);

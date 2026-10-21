@@ -6,7 +6,7 @@ export function downloadTemplate(type: 'requirement' | 'vendor' | 'installation'
   if (type === 'requirement') {
     headers = ['Zone', 'State', 'City', 'TC Code', 'TC Name', 'Client Name', 'Exam Name'];
   } else if (type === 'vendor') {
-    headers = ['Zone', 'Vendor Name'];
+    headers = ['Zone', 'Vendor ID', 'Vendor Name'];
   } else {
     headers = [
       'Client Name', 'Exam Name', 'TC Code', 'Exam Date', 'Scheduled Candidates',
@@ -59,16 +59,30 @@ export function parseVendorFile(file: File): Promise<Partial<VendorMaster>[]> {
         const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
         const parsed = rows.map(r => ({
           zone: String(r['Zone'] || '').trim(),
+          vendorCode: String(r['Vendor ID'] || '').trim(),
           vendorName: String(r['Vendor Name'] || '').trim(),
         }));
         resolve(parsed);
       } catch (err) {
         reject(err);
       }
+
     };
     reader.onerror = () => reject(new Error('File read error'));
     reader.readAsBinaryString(file);
   });
+}
+
+export function exportVendorsToExcel(vendors: VendorMaster[]): void {
+  const rows = vendors.map(vendor => ({
+    'Vendor ID': vendor.vendorCode || vendor.id,
+    'Zone': vendor.zone,
+    'Vendor Name': vendor.vendorName,
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Vendors');
+  XLSX.writeFile(wb, `ion-cctv-vendors-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 export interface BulkInstallationRow {

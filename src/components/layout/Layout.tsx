@@ -2,12 +2,13 @@ import React, { useState, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { exportBackup, importBackup } from '../../utils/storage';
+import { PageExportActions } from './PageExportActions';
 import { clsx } from 'clsx';
 import {
   LayoutDashboard, FileText, Users, ClipboardList, TrendingUp,
   Wrench, LogOut, Menu, X, ChevronDown, RefreshCw,
   Download, Upload, Cloud, CloudOff, Loader2, CheckCircle2, AlertCircle,
-  MessageCircle,
+  MessageCircle, UserCog,
 } from 'lucide-react';
 
 const navItems = [
@@ -15,20 +16,24 @@ const navItems = [
   { to: '/dashboard/financial',  label: 'Finance',            icon: TrendingUp,      viewerVisible: true },
   { to: '/dashboard/operations', label: 'Operations',         icon: Wrench,          viewerVisible: true },
   { to: '/dashboard/vendor',     label: 'Vendor Dashboard',   icon: Users,           viewerVisible: false },
+  { to: '/dashboard/venue',      label: 'Venue Dashboard',    icon: LayoutDashboard,viewerVisible: true },
   { to: '/requirements',         label: 'Requirements',       icon: FileText,        viewerVisible: false },
   { to: '/vendors',              label: 'Vendors',             icon: Users,           viewerVisible: true },
   { to: '/records',              label: 'Records',             icon: ClipboardList,  viewerVisible: false },
   { to: '/chat',                 label: 'AI Chat',             icon: MessageCircle,   viewerVisible: true },
+  { to: '/users',                label: 'User Management',     icon: UserCog,         viewerVisible: false },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const { currentUser, logout, data, syncStatus, syncError, isGitHub, reloadFromGitHub, updateData } = useAuth();
+  const { currentUser, logout, data, syncStatus, syncError, isGitHub, reloadFromGitHub, updateData, can } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen]   = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const restoreRef = useRef<HTMLInputElement>(null);
   const isViewer = currentUser?.role === 'viewer';
-  const visibleNavItems = navItems.filter(item => !isViewer || item.viewerVisible);
+  const visibleNavItems = navItems.filter(item =>
+    item.to === '/users' ? can('manage_users') : (!isViewer || item.viewerVisible)
+  );
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -162,6 +167,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </header>
 
       <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 py-7 sm:px-6 lg:px-8">
+        <PageExportActions />
         {children}
       </main>
     </div>

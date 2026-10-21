@@ -1,15 +1,20 @@
 import React, { useRef, useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Input, Select } from '../../components/ui/FormFields';
 import { Alert, Badge, ConfirmDialog, Modal } from '../../components/ui/index';
-import { downloadTemplate, parseVendorFile } from '../../utils/excel';
+import { downloadTemplate, exportVendorsToExcel, parseVendorFile } from '../../utils/excel';
 import type { VendorMaster } from '../../types';
 import { Download, Upload, Trash2, Plus } from 'lucide-react';
 import { TablePagination } from '../../components/ui/TablePagination';
 
 const PAGE_SIZE = 25;
+
+function createVendorCode(): string {
+  return `VND-${uuidv4().slice(0, 8).toUpperCase()}`;
+}
 
 export default function VendorsPage() {
   const { data, updateData, addAuditLog, can, currentUser } = useAuth();
@@ -20,7 +25,7 @@ export default function VendorsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [addModal, setAddModal] = useState(false);
-  const [form, setForm] = useState<{ zone: string; vendorName: string }>({ zone: '', vendorName: '' });
+  const [form, setForm] = useState<{ vendorCode: string; zone: string; vendorName: string }>({ vendorCode: createVendorCode(), zone: '', vendorName: '' });
   const [formError, setFormError] = useState('');
   const [page, setPage] = useState(1);
 
@@ -28,7 +33,9 @@ export default function VendorsPage() {
 
   const filtered = data.vendors.filter(v => {
     if (filterZone && v.zone !== filterZone) return false;
-    if (search && !v.vendorName.toLowerCase().includes(search.toLowerCase()) && !v.zone.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !v.vendorName.toLowerCase().includes(search.toLowerCase()) &&
+      !v.zone.toLowerCase().includes(search.toLowerCase()) &&
+      !(v.vendorCode || v.id).toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -40,10 +47,28 @@ export default function VendorsPage() {
     if (!file) return;
     try {
       const rows = await parseVendorFile(file);
+      const importedVendorCodes = new Set<string>();
       const previewRows = rows.map(row => {
         if (!row.zone || !row.vendorName) return { ...row, status: 'ERROR' as const, error: 'Missing fields' };
-        const existing = data.vendors.find(v => v.zone === row.zone && v.vendorName === row.vendorName);
-        return { ...row, id: existing?.id, status: existing ? 'UPDATE' as const : 'NEW' as const };
+        const normalizedCode = row.vendorCode?.trim().toLowerCase();
+        if (normalizedCode && importedVendorCodes.has(normalizedCode)) {
+          return { ...row, status: 'ERROR' as const, error: 'Vendor ID appears more than once in the file' };
+        }
+        if (normalizedCode) importedVendorCodes.add(normalizedCode);
+        const existing = data.vendors.find(v =>
+          (normalizedCode && (v.vendorCode || v.id).toLowerCase() === normalizedCode) ||
+          (v.zone === row.zone && v.vendorName === row.vendorName)
+        );
+        const duplicateCode = row.vendorCode && data.vendors.some(v =>
+          (v.vendorCode || v.id).toLowerCase() === normalizedCode && v.id !== existing?.id
+        );
+        if (duplicateCode) return { ...row, status: 'ERROR' as const, error: 'Vendor ID already belongs to another vendor' };
+        return {
+          ...row,
+          vendorCode: row.vendorCode || existing?.vendorCode || existing?.id || createVendorCode(),
+          id: existing?.id,
+          status: existing ? 'UPDATE' as const : 'NEW' as const,
+        };
       });
       setPreview(previewRows);
     } catch {
@@ -59,9 +84,9 @@ export default function VendorsPage() {
       let vendors = [...prev.vendors];
       valid.forEach(row => {
         if (row.status === 'UPDATE' && row.id) {
-          vendors = vendors.map(v => v.id === row.id ? { ...v, zone: row.zone!, vendorName: row.vendorName!, updatedAt: new Date().toISOString() } : v);
+          vendors = vendors.map(v => v.id === row.id ? { ...v, vendorCode: row.vendorCode || v.vendorCode || v.id, zone: row.zone!, vendorName: row.vendorName!, updatedAt: new Date().toISOString() } : v);
         } else {
-          vendors.push({ id: uuidv4(), zone: row.zone!, vendorName: row.vendorName!, createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+          vendors.push({ id: uuidv4(), vendorCode: row.vendorCode || createVendorCode(), zone: row.zone!, vendorName: row.vendorName!, createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
         }
       });
       return { ...prev, vendors };
@@ -87,14 +112,18 @@ export default function VendorsPage() {
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.zone || !form.vendorName) { setFormError('All fields required.'); return; }
+    if (!form.zone || !form.vendorName || !form.vendorCode.trim()) { setFormError('All fields required.'); return; }
     const dup = data.vendors.find(v => v.zone === form.zone && v.vendorName === form.vendorName);
     if (dup) { setFormError('Duplicate: Zone + Vendor Name already exists.'); return; }
-    const newV: VendorMaster = { id: uuidv4(), zone: form.zone, vendorName: form.vendorName, createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    if (data.vendors.some(v => (v.vendorCode || v.id).toLowerCase() === form.vendorCode.trim().toLowerCase())) {
+      setFormError('Vendor ID already exists.');
+      return;
+    }
+    const newV: VendorMaster = { id: uuidv4(), vendorCode: form.vendorCode.trim(), zone: form.zone, vendorName: form.vendorName.trim(), createdBy: currentUser!.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     updateData(prev => ({ ...prev, vendors: [...prev.vendors, newV] }));
     addAuditLog('CREATE', 'VendorMaster', newV.id, undefined, newV);
     setAddModal(false);
-    setForm({ zone: '', vendorName: '' });
+    setForm({ vendorCode: createVendorCode(), zone: '', vendorName: '' });
     setFormError('');
     setAlert({ type: 'success', msg: 'Vendor added.' });
   };
@@ -105,6 +134,7 @@ export default function VendorsPage() {
         <h1 className="text-xl font-bold text-gray-900">Zone-wise Vendor Master</h1>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => downloadTemplate('vendor')}><Download size={14} /> Template</Button>
+          <Button variant="outline" size="sm" onClick={() => exportVendorsToExcel(data.vendors)}><Download size={14} /> Download Data</Button>
           {can('upload_master') && (
             <>
               <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Upload</Button>
@@ -134,16 +164,17 @@ export default function VendorsPage() {
             <span className="text-red-700">Errors: {preview.filter(r => r.status === 'ERROR').length}</span>
           </div>
           <div className="overflow-x-auto max-h-48">
-            <table className="w-full text-xs">
-              <thead><tr className="bg-gray-50"><th className="px-2 py-1 text-left">Status</th><th className="px-2 py-1 text-left">Zone</th><th className="px-2 py-1 text-left">Vendor Name</th><th className="px-2 py-1 text-left">Error</th></tr></thead>
+            <SortableTable className="w-full text-xs">
+              <thead><tr className="bg-gray-50"><th className="px-2 py-1 text-left">Status</th><th className="px-2 py-1 text-left">Vendor ID</th><th className="px-2 py-1 text-left">Zone</th><th className="px-2 py-1 text-left">Vendor Name</th><th className="px-2 py-1 text-left">Error</th></tr></thead>
               <tbody>{preview.map((r, i) => (
                 <tr key={i} className="border-t">
                   <td className="px-2 py-1"><Badge variant={r.status === 'NEW' ? 'success' : r.status === 'UPDATE' ? 'info' : 'error'}>{r.status}</Badge></td>
+                  <td className="px-2 py-1 font-mono">{r.vendorCode}</td>
                   <td className="px-2 py-1">{r.zone}</td><td className="px-2 py-1">{r.vendorName}</td>
                   <td className="px-2 py-1 text-red-600">{r.error}</td>
                 </tr>
               ))}</tbody>
-            </table>
+            </SortableTable>
           </div>
           <div className="flex gap-2 mt-3">
             <Button size="sm" onClick={confirmImport} disabled={preview.every(r => r.status === 'ERROR')}>Confirm Import</Button>
@@ -153,14 +184,15 @@ export default function VendorsPage() {
       )}
 
       <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
-        <table className="w-full text-sm">
+        <SortableTable className="w-full text-sm">
           <thead><tr className="bg-gray-50 border-b">
-            {['Zone','Vendor Name','Created At','Actions'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">{h}</th>)}
+            {['Vendor ID','Zone','Vendor Name','Created At','Actions'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">{h}</th>)}
           </tr></thead>
           <tbody>
-            {filtered.length === 0 ? <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No vendors found.</td></tr>
+            {filtered.length === 0 ? <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No vendors found.</td></tr>
               : pageRows.map(v => (
                 <tr key={v.id} className="border-t hover:bg-gray-50">
+                  <td className="px-4 py-3 font-mono text-xs">{v.vendorCode || v.id}</td>
                   <td className="px-4 py-3">{v.zone}</td>
                   <td className="px-4 py-3">{v.vendorName}</td>
                   <td className="px-4 py-3 text-xs text-gray-500">{new Date(v.createdAt).toLocaleDateString('en-IN')}</td>
@@ -170,7 +202,7 @@ export default function VendorsPage() {
                 </tr>
               ))}
           </tbody>
-        </table>
+        </SortableTable>
         <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setPage} />
       </div>
 
@@ -179,6 +211,7 @@ export default function VendorsPage() {
 
       <Modal open={addModal} onClose={() => { setAddModal(false); setFormError(''); }} title="Add Vendor">
         <form onSubmit={handleAddSubmit} className="flex flex-col gap-3">
+          <Input label="Vendor ID" value={form.vendorCode} onChange={e => setForm(p => ({ ...p, vendorCode: e.target.value }))} required />
           <Select label="Zone" value={form.zone} onChange={e => setForm(p => ({ ...p, zone: e.target.value }))}
             options={zones.map(z => ({ value: z, label: z }))} placeholder="Select Zone" required />
           <Input label="Vendor Name" value={form.vendorName} onChange={e => setForm(p => ({ ...p, vendorName: e.target.value }))} required />

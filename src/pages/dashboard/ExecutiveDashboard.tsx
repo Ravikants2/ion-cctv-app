@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
@@ -75,7 +76,7 @@ export default function ExecutiveDashboard() {
           <h2 className="text-lg font-bold capitalize">{kpiDetail.replace(/([A-Z])/g, ' $1')} Details</h2>
         </div>
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50 border-b">
               {['Zone','State','City','TC Code','TC Name','Client','Exam','Exam Days','Candidates','Cost'].map(h => (
                 <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -97,7 +98,7 @@ export default function ExecutiveDashboard() {
                 );
               })}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination page={currentDetailPage} pageSize={PAGE_SIZE} totalItems={detailInsts.length} onPageChange={setDetailPage} />
         </div>
       </div>
@@ -121,7 +122,7 @@ export default function ExecutiveDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
           <div className="px-4 py-3 border-b font-semibold text-gray-800">Client Comparison</div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50">
               {['Client','Exams','Venues','Candidates','Total Cost','Per Candidate'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -139,13 +140,13 @@ export default function ExecutiveDashboard() {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </SortableTable>
         </div>
 
         {/* Exam Comparison */}
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
           <div className="px-4 py-3 border-b font-semibold text-gray-800">Exam Comparison</div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50">
               {['Exam','Clients','Venues','Candidates','Total Cost','Per Candidate'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -163,7 +164,7 @@ export default function ExecutiveDashboard() {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </SortableTable>
         </div>
       </div>
 
@@ -212,7 +213,7 @@ function DrillDownTable({ data, filtered, drill, setDrill }: {
 
   const rows = getRows();
   return (
-    <table className="w-full text-sm">
+    <SortableTable className="w-full text-sm">
       <thead><tr className="bg-gray-50"><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Name</th><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Venues</th><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Candidates</th><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Cost</th></tr></thead>
       <tbody>
         {rows.map((r, i) => (
@@ -224,6 +225,6 @@ function DrillDownTable({ data, filtered, drill, setDrill }: {
           </tr>
         ))}
       </tbody>
-    </table>
+    </SortableTable>
   );
 }

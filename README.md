@@ -85,9 +85,12 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 
 ## Features
 
-- 4 Dashboards: Executive, Financial, Operations, Vendor
+- 5 Dashboards: Executive, Financial, Operations, Vendor, Venue
+- Sortable table headings across the app
+- Excel/PDF export controls on app pages
 - Requirement Master upload (CSV/XLSX template)
-- Zone-wise Vendor Master upload
+- Zone-wise Vendor Master upload/download with round-trippable Vendor IDs
+- Super Admin user management: create and delete users, and change passwords
 - Installation Record (single entry + bulk upload)
 - Exam date-wise candidate tracking
 - Quotation PDF upload and view

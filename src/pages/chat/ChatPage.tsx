@@ -1,4 +1,5 @@
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { Bot, Loader2, MessageCircle, RotateCcw, Send, UserRound } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
@@ -56,7 +57,7 @@ export function AssistantAnswer({ text }: { text: string }) {
       }
       blocks.push(
         <div key={`table-${index}`} className="my-3 max-w-full overflow-x-auto rounded-lg border border-gray-200">
-          <table className="min-w-full border-collapse text-left text-xs sm:text-sm">
+          <SortableTable className="min-w-full border-collapse text-left text-xs sm:text-sm">
             <thead className="bg-blue-50 text-gray-700">
               <tr>{headers.map((cell, cellIndex) => (
                 <th key={cellIndex} className="whitespace-nowrap border-b px-3 py-2 font-semibold">
@@ -75,7 +76,7 @@ export function AssistantAnswer({ text }: { text: string }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </SortableTable>
         </div>
       );
       continue;

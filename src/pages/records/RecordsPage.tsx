@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -125,7 +126,7 @@ export default function RecordsPage() {
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <SortableTable className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50">
               {['S No','Zone','State','City','TC Code','TC Name','Exam Days','Candidates','Vendor','Cost (Excl. Tax)','Quotation','Actions'].map(h => (
@@ -170,7 +171,7 @@ export default function RecordsPage() {
               );
             })}
           </tbody>
-        </table>
+        </SortableTable>
         </div>
         <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setPage} />
       </div>

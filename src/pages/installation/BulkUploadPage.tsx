@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
@@ -179,7 +180,7 @@ export default function BulkUploadPage() {
           </div>
 
           <div className="overflow-x-auto max-h-96 mb-4">
-            <table className="w-full text-xs">
+            <SortableTable className="w-full text-xs">
               <thead><tr className="bg-gray-50 sticky top-0">
                 {['Row','Status','Client','Exam','TC Code','Date','Candidates','Vendor','Cost','Errors'].map(h => (
                   <th key={h} className="px-2 py-2 text-left font-semibold text-gray-600">{h}</th>
@@ -201,7 +202,7 @@ export default function BulkUploadPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </SortableTable>
           </div>
 
           <div className="flex gap-2">

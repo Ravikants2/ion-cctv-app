@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
@@ -101,7 +102,7 @@ export default function FinancialDashboard() {
         <button onClick={() => setKpiDetail(null)} className="text-blue-600 hover:underline text-sm mb-4 block">← Back to Dashboard</button>
         <h2 className="text-lg font-bold mb-4 capitalize">{kpiDetail.replace(/([A-Z])/g, ' $1')} Details</h2>
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50 border-b">
               {['Zone','TC Code','TC Name','Candidates','Cost','Per Candidate'].map(h => (
                 <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -126,7 +127,7 @@ export default function FinancialDashboard() {
                 );
               })}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filtered.length} onPageChange={setDetailPage} />
         </div>
       </div>
@@ -155,7 +156,7 @@ export default function FinancialDashboard() {
         {/* Top 10 Cost */}
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
           <div className="px-4 py-3 border-b font-semibold text-gray-800">Top 10 Highest Cost Venues</div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50"><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Code</th><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Name</th><th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Cost</th></tr></thead>
             <tbody>
               {top10Cost.length === 0 ? <tr><td colSpan={3} className="px-4 py-4 text-center text-gray-400">No data</td></tr>
@@ -170,7 +171,7 @@ export default function FinancialDashboard() {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination
             page={currentTopCostPage}
             pageSize={TOP_LIST_PAGE_SIZE}
@@ -182,7 +183,7 @@ export default function FinancialDashboard() {
         {/* Top 10 Per Candidate */}
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
           <div className="px-4 py-3 border-b font-semibold text-gray-800">Top 10 Highest Per Candidate Cost</div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50"><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Code</th><th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">TC Name</th><th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Per Candidate</th></tr></thead>
             <tbody>
               {top10PerCandidate.length === 0 ? <tr><td colSpan={3} className="px-4 py-4 text-center text-gray-400">No data</td></tr>
@@ -194,7 +195,7 @@ export default function FinancialDashboard() {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination
             page={currentTopCandidatePage}
             pageSize={TOP_LIST_PAGE_SIZE}
@@ -208,7 +209,7 @@ export default function FinancialDashboard() {
       {variance.length > 0 && (
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto mb-6">
           <div className="px-4 py-3 border-b font-semibold text-gray-800">Minimum Cost vs Actual Cost Variance</div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50">
               {['TC Code','TC Name','Actual Cost','Minimum Cost','Variance'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -225,7 +226,7 @@ export default function FinancialDashboard() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination
             page={currentVariancePage}
             pageSize={PAGE_SIZE}
@@ -238,7 +239,7 @@ export default function FinancialDashboard() {
       {/* Zone-wise Costing */}
       <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
         <div className="px-4 py-3 border-b font-semibold text-gray-800">Zone-wise Costing</div>
-        <table className="w-full text-sm">
+        <SortableTable className="w-full text-sm">
           <thead><tr className="bg-gray-50">
             {['Zone','Venues','Cities','Candidates','Total Cost','Per Candidate'].map(h => (
               <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -257,7 +258,7 @@ export default function FinancialDashboard() {
                 </tr>
               ))}
           </tbody>
-        </table>
+        </SortableTable>
         <TablePagination
           page={currentZoneSummaryPage}
           pageSize={PAGE_SIZE}
@@ -272,7 +273,7 @@ export default function FinancialDashboard() {
             <button onClick={() => setDrillZone(null)} className="text-blue-600 hover:underline text-sm">← Back</button>
             <span className="font-semibold">Zone: {drillZone} — Venue Details</span>
           </div>
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50">
               {['State','City','TC Code','TC Name','Candidates','Cost','Per Candidate'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -293,7 +294,7 @@ export default function FinancialDashboard() {
                 );
               })}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination
             page={currentZonePage}
             pageSize={PAGE_SIZE}

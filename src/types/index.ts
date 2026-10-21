@@ -24,6 +24,7 @@ export interface RequirementMaster {
 
 export interface VendorMaster {
   id: string;
+  vendorCode?: string;
   zone: string;
   vendorName: string;
   createdBy: string;

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SortableTable } from '../../components/ui/SortableTable';
 import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FilterContext';
 import { GlobalFilters } from '../../components/dashboard/GlobalFilters';
@@ -66,7 +67,7 @@ export default function VendorDashboard() {
       <div>
         <GlobalFilters />
         <button onClick={() => setDrillVendorId(null)} className="text-blue-600 hover:underline text-sm mb-4 block">← Back to Vendor Dashboard</button>
-        <h2 className="text-lg font-bold mb-4">Vendor: {drillVendor.vendor.vendorName}</h2>
+        <h2 className="text-lg font-bold mb-4">Vendor: {drillVendor.vendor.vendorName} <span className="font-mono text-sm font-normal text-gray-500">({drillVendor.vendor.vendorCode || drillVendor.vendor.id})</span></h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           <KPICard title="Venues" value={drillVendor.venues} color="blue" />
           <KPICard title="Candidates" value={drillVendor.candidates.toLocaleString('en-IN')} color="purple" />
@@ -74,7 +75,7 @@ export default function VendorDashboard() {
           <KPICard title="Per Candidate" value={<CostValue amount={drillVendor.perCandidate} />} color="teal" />
         </div>
         <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <SortableTable className="w-full text-sm">
             <thead><tr className="bg-gray-50 border-b">
               {['Client','Exam','Zone','State','City','TC Code','TC Name','Exam Days','Candidates','Cost'].map(h => (
                 <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-600">{h}</th>
@@ -100,7 +101,7 @@ export default function VendorDashboard() {
                 );
               })}
             </tbody>
-          </table>
+          </SortableTable>
           <TablePagination page={currentDetailPage} pageSize={PAGE_SIZE} totalItems={drillVendor.insts.length} onPageChange={setDetailPage} />
         </div>
       </div>
@@ -130,17 +131,18 @@ export default function VendorDashboard() {
 
       <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
         <div className="px-4 py-3 border-b font-semibold text-gray-800">Vendor Summary</div>
-        <table className="w-full text-sm">
+        <SortableTable className="w-full text-sm">
           <thead><tr className="bg-gray-50">
-            {['Vendor','Clients','Exams','Zones','Venues','Exam Days','Candidates','Cameras','Total Cost','Per Candidate'].map(h => (
+            {['Vendor ID','Vendor','Clients','Exams','Zones','Venues','Exam Days','Candidates','Cameras','Total Cost','Per Candidate'].map(h => (
               <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">{h}</th>
             ))}
           </tr></thead>
           <tbody>
             {vendorStats.length === 0 ? (
-              <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No vendor data for selected filters.</td></tr>
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No vendor data for selected filters.</td></tr>
             ) : summaryRows.map(v => (
               <tr key={v.vendor.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => setDrillVendorId(v.vendor.id)}>
+                <td className="px-3 py-2 font-mono text-xs">{v.vendor.vendorCode || v.vendor.id}</td>
                 <td className="px-3 py-2 font-medium text-blue-700">{v.vendor.vendorName}</td>
                 <td className="px-3 py-2">{v.clients}</td>
                 <td className="px-3 py-2">{v.exams}</td>
@@ -154,7 +156,7 @@ export default function VendorDashboard() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </SortableTable>
         <TablePagination page={currentSummaryPage} pageSize={PAGE_SIZE} totalItems={vendorStats.length} onPageChange={setSummaryPage} />
       </div>
     </div>
