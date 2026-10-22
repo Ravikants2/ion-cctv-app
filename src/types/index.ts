@@ -1,4 +1,11 @@
-export type Role = 'super_admin' | 'sub_admin' | 'user' | 'viewer';
+export type ApprovalStage = 'surveillance_head' | 'enablement_head';
+export type ApprovalStatus = 'pending' | 'returned' | 'approved';
+export type Role = 'super_admin' | 'sub_admin' | 'user' | 'viewer' | 'zonal_user' | ApprovalStage;
+
+export const ZONES = [
+  'East 1', 'East 2', 'North 1', 'North 2', 'North 3', 'North 4',
+  'South 1', 'South 2', 'West 1', 'West 2',
+] as const;
 
 export interface User {
   id: string;
@@ -6,6 +13,7 @@ export interface User {
   email: string;
   role: Role;
   passwordHash: string;
+  zone?: string;
 }
 
 export interface RequirementMaster {
@@ -57,6 +65,47 @@ export interface InstallationRecord {
   createdAt: string;
   updatedBy: string;
   updatedAt: string;
+  approvalStatus?: ApprovalStatus;
+  approvalStage?: ApprovalStage;
+}
+
+export interface QuoteRevision {
+  id: string;
+  installationRecordId: string;
+  createdAt: string;
+  createdBy: string;
+  remarks?: string;
+  vendorId: string;
+  localVendorCost: number;
+  minimumCost?: number;
+  quotationFileId?: string;
+  installationType: InstallationType;
+  cameraCount: number;
+  totalCandidates: number;
+  examDates: Array<{ examDate: string; scheduledCandidates: number }>;
+}
+
+export interface ApprovalEvent {
+  id: string;
+  installationRecordId: string;
+  stage: ApprovalStage;
+  action: 'approved' | 'sent_back';
+  userId: string;
+  remarks: string;
+  exception?: boolean;
+  quoteRevisionId: string;
+  createdAt: string;
+}
+
+export interface BlanketApproval {
+  id: string;
+  clientName: string;
+  examName: string;
+  stage: ApprovalStage;
+  userId: string;
+  remarks: string;
+  installationRecordIds: string[];
+  createdAt: string;
 }
 
 export interface ExamDateDetail {
@@ -96,6 +145,9 @@ export interface AppData {
   installations: InstallationRecord[];
   examDates: ExamDateDetail[];
   quotations: QuotationFile[];
+  quoteRevisions: QuoteRevision[];
+  approvalEvents: ApprovalEvent[];
+  blanketApprovals: BlanketApproval[];
   auditLogs: AuditLog[];
 }
 

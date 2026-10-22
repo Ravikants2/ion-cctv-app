@@ -18,6 +18,9 @@ const data: AppData = {
   installations: [],
   examDates: [],
   quotations: [],
+  quoteRevisions: [],
+  approvalEvents: [],
+  blanketApprovals: [],
   auditLogs: [],
 };
 

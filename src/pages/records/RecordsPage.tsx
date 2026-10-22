@@ -15,7 +15,7 @@ import { normalizeExamDate } from '../../utils/dates';
 const PAGE_SIZE = 10;
 
 export default function RecordsPage() {
-  const { data, can } = useAuth();
+  const { data, can, currentUser } = useAuth();
   const navigate = useNavigate();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -26,18 +26,22 @@ export default function RecordsPage() {
   const [filterCity, setFilterCity] = useState('');
   const [page, setPage] = useState(1);
 
-  const clients = [...new Set(data.requirements.map(r => r.clientName))].sort();
-  const exams = [...new Set(data.requirements.filter(r => !filterClient || r.clientName === filterClient).map(r => r.examName))].sort();
-  const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
-  const states = [...new Set(data.requirements
+  const scopedRequirements = data.requirements.filter(r => currentUser?.role !== 'zonal_user' || r.zone === currentUser.zone);
+  const scopedInstallations = data.installations.filter(inst =>
+    scopedRequirements.some(requirement => requirement.id === inst.requirementId)
+  );
+  const clients = [...new Set(scopedRequirements.map(r => r.clientName))].sort();
+  const exams = [...new Set(scopedRequirements.filter(r => !filterClient || r.clientName === filterClient).map(r => r.examName))].sort();
+  const zones = [...new Set(scopedRequirements.map(r => r.zone))].sort();
+  const states = [...new Set(scopedRequirements
     .filter(r => !filterZone || r.zone === filterZone)
     .map(r => r.state))].sort();
-  const cities = [...new Set(data.requirements
+  const cities = [...new Set(scopedRequirements
     .filter(r => (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState))
     .map(r => r.city))].sort();
 
-  const filtered = data.installations.filter(inst => {
-    const req = data.requirements.find(r => r.id === inst.requirementId);
+  const filtered = scopedInstallations.filter(inst => {
+    const req = scopedRequirements.find(r => r.id === inst.requirementId);
     if (!req) return false;
     if (filterClient && req.clientName !== filterClient) return false;
     if (filterExam && req.examName !== filterExam) return false;
@@ -83,10 +87,10 @@ export default function RecordsPage() {
           <p className="mt-1 text-sm text-slate-500">Review schedules, vendors, and installation costs.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => exportRecordsToExcel(filtered, data.requirements, data.vendors, data.examDates)}>
+          <Button variant="outline" size="sm" onClick={() => exportRecordsToExcel(filtered, scopedRequirements, data.vendors.filter(vendor => currentUser?.role !== 'zonal_user' || vendor.zone === currentUser.zone), data.examDates)}>
             <Download size={14} /> Excel
           </Button>
-          <Button variant="outline" size="sm" onClick={() => printRecordsPDF(filtered, data.requirements, data.vendors, data.examDates, filterLabel)}>
+          <Button variant="outline" size="sm" onClick={() => printRecordsPDF(filtered, scopedRequirements, data.vendors.filter(vendor => currentUser?.role !== 'zonal_user' || vendor.zone === currentUser.zone), data.examDates, filterLabel)}>
             <Printer size={14} /> PDF
           </Button>
           {can('create_installation') && (
@@ -131,16 +135,16 @@ export default function RecordsPage() {
         <SortableTable className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50">
-              {['S No','Zone','State','City','TC Code','TC Name','Exam Days','Candidates','Vendor','Cost (Excl. Tax)','Quotation','Actions'].map(h => (
+              {['S No','Zone','State','City','TC Code','TC Name','Exam Days','Candidates','Vendor','Cost (Excl. Tax)','Approval','Quotation','Actions'].map(h => (
                 <th key={h} className="whitespace-nowrap px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No records found.</td></tr>
+              <tr><td colSpan={13} className="px-4 py-8 text-center text-gray-400">No records found.</td></tr>
             ) : pageRows.map((inst, idx) => {
-              const req = data.requirements.find(r => r.id === inst.requirementId);
+              const req = scopedRequirements.find(r => r.id === inst.requirementId);
               const vendor = data.vendors.find(v => v.id === inst.vendorId);
               const { examDays, totalCandidates } = getInstallationStats(inst, data.examDates);
               return (
@@ -156,6 +160,15 @@ export default function RecordsPage() {
                   <td className="px-3 py-3">{vendor?.vendorName}</td>
                   <td className="px-3 py-3 text-right font-medium"><CostValue amount={inst.localVendorCost} /></td>
                   <td className="px-3 py-3">
+                    {inst.approvalStatus === 'returned'
+                      ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">Changes requested</span>
+                      : inst.approvalStatus === 'pending'
+                        ? <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">Awaiting approval</span>
+                        : inst.approvalStatus === 'approved'
+                          ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">Approved</span>
+                          : <span className="text-xs text-slate-500">Legacy record</span>}
+                  </td>
+                  <td className="px-3 py-3">
                     {inst.quotationFileId ? (
                       <Button variant="ghost" size="sm" onClick={() => handleViewQuotation(inst.quotationFileId!)}>
                         <Eye size={12} /> View
@@ -164,9 +177,11 @@ export default function RecordsPage() {
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => navigate(`/installation/edit/${inst.id}`)}>
-                        <Pencil size={12} />
-                      </Button>
+                      {can('edit_installation') && (currentUser?.role !== 'zonal_user' || inst.approvalStatus === 'returned') && (
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/installation/edit/${inst.id}`)}>
+                          <Pencil size={12} />
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>

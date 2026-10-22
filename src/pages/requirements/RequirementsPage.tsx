@@ -34,17 +34,18 @@ export default function RequirementsPage() {
   const [formError, setFormError] = useState('');
   const [page, setPage] = useState(1);
 
-  const clients = [...new Set(data.requirements.map(r => r.clientName))].sort();
-  const exams = [...new Set(data.requirements.filter(r => !filterClient || r.clientName === filterClient).map(r => r.examName))].sort();
-  const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
-  const states = [...new Set(data.requirements
+  const scopedRequirements = data.requirements.filter(r => currentUser?.role !== 'zonal_user' || r.zone === currentUser.zone);
+  const clients = [...new Set(scopedRequirements.map(r => r.clientName))].sort();
+  const exams = [...new Set(scopedRequirements.filter(r => !filterClient || r.clientName === filterClient).map(r => r.examName))].sort();
+  const zones = [...new Set(scopedRequirements.map(r => r.zone))].sort();
+  const states = [...new Set(scopedRequirements
     .filter(r => !filterZone || r.zone === filterZone)
     .map(r => r.state))].sort();
-  const cities = [...new Set(data.requirements
+  const cities = [...new Set(scopedRequirements
     .filter(r => (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState))
     .map(r => r.city))].sort();
 
-  const filtered = data.requirements.filter(r => {
+  const filtered = scopedRequirements.filter(r => {
     if (filterClient && r.clientName !== filterClient) return false;
     if (filterExam && r.examName !== filterExam) return false;
     if (filterZone && r.zone !== filterZone) return false;
@@ -71,7 +72,7 @@ export default function RequirementsPage() {
         if (!row.zone || !row.state || !row.city || !row.tcCode || !row.tcName || !row.clientName || !row.examName) {
           return { ...row, status: 'ERROR', error: 'Missing required fields' };
         }
-        const existing = data.requirements.find(r =>
+        const existing = scopedRequirements.find(r =>
           r.clientName === row.clientName && r.examName === row.examName && r.tcCode === row.tcCode
         );
         return { ...row, id: existing?.id, status: existing ? 'UPDATE' : 'NEW' };
@@ -118,7 +119,7 @@ export default function RequirementsPage() {
 
   const confirmDelete = () => {
     if (!deleteId) return;
-    const req = data.requirements.find(r => r.id === deleteId);
+    const req = scopedRequirements.find(r => r.id === deleteId);
     updateData(prev => ({ ...prev, requirements: prev.requirements.filter(r => r.id !== deleteId) }));
     addAuditLog('DELETE', 'RequirementMaster', deleteId, req, undefined);
     setDeleteId(null);
@@ -132,7 +133,7 @@ export default function RequirementsPage() {
       setFormError('All fields are required.');
       return;
     }
-    const dup = data.requirements.find(r => r.clientName === clientName && r.examName === examName && r.tcCode === tcCode);
+    const dup = scopedRequirements.find(r => r.clientName === clientName && r.examName === examName && r.tcCode === tcCode);
     if (dup) { setFormError('Duplicate: Client + Exam + TC Code already exists.'); return; }
     const newReq: RequirementMaster = {
       id: uuidv4(), zone, state, city, tcCode, tcName, clientName, examName,

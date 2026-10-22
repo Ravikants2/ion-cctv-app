@@ -43,7 +43,28 @@ export function getInitialData(): AppData {
     installations: [],
     examDates: [],
     quotations: [],
+    quoteRevisions: [],
+    approvalEvents: [],
+    blanketApprovals: [],
     auditLogs: [],
+  };
+}
+
+export function normalizeAppData(data: Partial<AppData>): AppData {
+  const initial = getInitialData();
+  return {
+    ...initial,
+    ...data,
+    users: Array.isArray(data.users) && data.users.length > 0 ? data.users : initial.users,
+    requirements: Array.isArray(data.requirements) ? data.requirements : [],
+    vendors: Array.isArray(data.vendors) ? data.vendors : [],
+    installations: Array.isArray(data.installations) ? data.installations : [],
+    examDates: Array.isArray(data.examDates) ? data.examDates : [],
+    quotations: Array.isArray(data.quotations) ? data.quotations : [],
+    quoteRevisions: Array.isArray(data.quoteRevisions) ? data.quoteRevisions : [],
+    approvalEvents: Array.isArray(data.approvalEvents) ? data.approvalEvents : [],
+    blanketApprovals: Array.isArray(data.blanketApprovals) ? data.blanketApprovals : [],
+    auditLogs: Array.isArray(data.auditLogs) ? data.auditLogs : [],
   };
 }
 
@@ -51,7 +72,7 @@ export function getInitialData(): AppData {
 function readLocal(): AppData | null {
   try {
     const raw = localStorage.getItem(LOCAL_KEY);
-    return raw ? (JSON.parse(raw) as AppData) : null;
+    return raw ? normalizeAppData(JSON.parse(raw) as Partial<AppData>) : null;
   } catch { return null; }
 }
 
@@ -87,13 +108,13 @@ export async function loadFromGitHub(): Promise<AppData> {
   if (!res.ok) throw new Error(`GitHub fetch failed: ${res.status}`);
   const json = await res.json() as { content: string; sha: string };
   const sha = json.sha;
-  const decoded = JSON.parse(atob(json.content.replace(/\n/g, ''))) as AppData;
+  const parsed = JSON.parse(atob(json.content.replace(/\n/g, ''))) as Partial<AppData>;
+  const decoded = normalizeAppData(parsed);
   localStorage.setItem(LOCAL_SHA, sha);
-  if (!Array.isArray(decoded.users) || decoded.users.length === 0) {
-    const initialized = { ...decoded, users: getInitialData().users };
-    writeLocal(initialized);
-    await saveToGitHub(initialized);
-    return initialized;
+  if (!Array.isArray(parsed.users) || parsed.users.length === 0) {
+    writeLocal(decoded);
+    await saveToGitHub(decoded);
+    return decoded;
   }
   writeLocal(decoded);
   return decoded;
@@ -174,7 +195,7 @@ export function importBackup(file: File): Promise<AppData> {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        resolve(JSON.parse(e.target?.result as string) as AppData);
+        resolve(normalizeAppData(JSON.parse(e.target?.result as string) as Partial<AppData>));
       } catch { reject(new Error('Invalid backup file')); }
     };
     reader.onerror = () => reject(new Error('Failed to read file'));

@@ -20,6 +20,7 @@ const navItems = [
   { to: '/requirements',         label: 'Requirements',       icon: FileText,        viewerVisible: false },
   { to: '/vendors',              label: 'Vendors',             icon: Users,           viewerVisible: true },
   { to: '/records',              label: 'Records',             icon: ClipboardList,  viewerVisible: false },
+  { to: '/approvals',            label: 'Approvals',           icon: CheckCircle2,    viewerVisible: false },
   { to: '/chat',                 label: 'AI Chat',             icon: MessageCircle,   viewerVisible: true },
   { to: '/users',                label: 'User Management',     icon: UserCog,         viewerVisible: false },
 ];
@@ -31,8 +32,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const restoreRef = useRef<HTMLInputElement>(null);
   const isViewer = currentUser?.role === 'viewer';
+  const isZonalUser = currentUser?.role === 'zonal_user';
   const visibleNavItems = navItems.filter(item =>
-    item.to === '/users' ? can('manage_users') : (!isViewer || item.viewerVisible)
+    item.to === '/users' ? can('manage_users')
+      : item.to === '/approvals' ? can('view_approvals')
+        : isZonalUser
+          ? ['/requirements', '/vendors', '/records'].includes(item.to)
+          : (!isViewer || item.viewerVisible)
   );
 
   const handleLogout = () => { logout(); navigate('/login'); };

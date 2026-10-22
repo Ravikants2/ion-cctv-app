@@ -8,7 +8,7 @@ import { Alert, ConfirmDialog, Modal } from '../../components/ui/index';
 import { SortableTable } from '../../components/ui/SortableTable';
 import { TablePagination } from '../../components/ui/TablePagination';
 import { hashPassword } from '../../utils/storage';
-import type { Role, User } from '../../types';
+import { ZONES, type Role, type User } from '../../types';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
 
 const roleOptions = [
@@ -16,6 +16,9 @@ const roleOptions = [
   { value: 'sub_admin', label: 'Sub Admin' },
   { value: 'user', label: 'User' },
   { value: 'viewer', label: 'Viewer' },
+  { value: 'zonal_user', label: 'Zonal User' },
+  { value: 'surveillance_head', label: 'Surveillance Head' },
+  { value: 'enablement_head', label: 'Head of Enablement' },
 ];
 const PAGE_SIZE = 10;
 
@@ -25,9 +28,10 @@ export default function UserManagementPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [form, setForm] = useState({ name: '', email: '', role: 'user' as Role, password: '' });
+  const [form, setForm] = useState({ name: '', email: '', role: 'user' as Role, password: '', zone: '' });
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<Role>('user');
+  const [newZone, setNewZone] = useState('');
   const [page, setPage] = useState(1);
 
   if (!can('manage_users')) {
@@ -40,9 +44,10 @@ export default function UserManagementPage() {
   const closeModal = () => {
     setModal(null);
     setSelectedUser(null);
-    setForm({ name: '', email: '', role: 'user', password: '' });
+    setForm({ name: '', email: '', role: 'user', password: '', zone: '' });
     setNewPassword('');
     setNewRole('user');
+    setNewZone('');
   };
 
   const createUser = (event: React.FormEvent<HTMLFormElement>) => {
@@ -51,6 +56,10 @@ export default function UserManagementPage() {
     const email = form.email.trim().toLowerCase();
     if (name.length === 0 || email.length === 0 || form.password.length < 8) {
       setAlert({ type: 'error', message: 'Enter a name, valid email, and password with at least 8 characters.' });
+      return;
+    }
+    if (form.role === 'zonal_user' && !form.zone) {
+      setAlert({ type: 'error', message: 'Select the assigned zone for this zonal user.' });
       return;
     }
     if (data.users.some(user => user.email.toLowerCase() === email)) {
@@ -64,6 +73,7 @@ export default function UserManagementPage() {
       email,
       role: form.role,
       passwordHash: hashPassword(form.password),
+      zone: form.role === 'zonal_user' ? form.zone : undefined,
     };
     updateData(previous => ({ ...previous, users: [...previous.users, user] }));
     addAuditLog('CREATE', 'User', user.id, undefined, { ...user, passwordHash: '[redacted]' });
@@ -99,11 +109,22 @@ export default function UserManagementPage() {
       setAlert({ type: 'error', message: 'At least one super admin must remain.' });
       return;
     }
+    const updatedRoleUser = {
+      ...selectedUser,
+      role: newRole,
+      zone: newRole === 'zonal_user' ? newZone : undefined,
+    };
+    if (newRole === 'zonal_user' && !newZone) {
+      setAlert({ type: 'error', message: 'Select the zone for this zonal user.' });
+      return;
+    }
     updateData(previous => ({
       ...previous,
-      users: previous.users.map(user => user.id === selectedUser.id ? { ...user, role: newRole } : user),
+      users: previous.users.map(user => user.id === selectedUser.id ? updatedRoleUser : user),
     }));
-    addAuditLog('UPDATE', 'User', selectedUser.id, { role: selectedUser.role }, { role: newRole });
+    addAuditLog('UPDATE', 'User', selectedUser.id,
+      { role: selectedUser.role, zone: selectedUser.zone },
+      { role: updatedRoleUser.role, zone: updatedRoleUser.zone });
     closeModal();
     setAlert({ type: 'success', message: `Role updated for ${selectedUser.name}.` });
   };
@@ -147,11 +168,14 @@ export default function UserManagementPage() {
               <tr key={user.id} className="border-t hover:bg-gray-50">
                 <td className="px-4 py-3 font-medium">{user.name}</td>
                 <td className="px-4 py-3">{user.email}</td>
-                <td className="px-4 py-3 capitalize">{user.role.replace('_', ' ')}</td>
+                <td className="px-4 py-3 capitalize">
+                  {user.role.replace('_', ' ')}
+                  {user.role === 'zonal_user' && user.zone && <span className="ml-2 text-xs text-slate-500">· {user.zone}</span>}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" disabled={user.id === currentUser?.id}
-                      onClick={() => { setAlert(null); setSelectedUser(user); setNewRole(user.role); setModal('role'); }}>
+                      onClick={() => { setAlert(null); setSelectedUser(user); setNewRole(user.role); setNewZone(user.zone || ''); setModal('role'); }}>
                       Change role
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => { setAlert(null); setSelectedUser(user); setModal('password'); }}>
@@ -176,6 +200,10 @@ export default function UserManagementPage() {
           <Input label="Email" type="email" value={form.email} onChange={event => setForm(previous => ({ ...previous, email: event.target.value }))} required />
           <Select label="Role" value={form.role} options={roleOptions}
             onChange={event => setForm(previous => ({ ...previous, role: event.target.value as Role }))} />
+          {form.role === 'zonal_user' && (
+            <Select label="Assigned zone" value={form.zone} options={ZONES.map(zone => ({ value: zone, label: zone }))}
+              placeholder="Select zone" onChange={event => setForm(previous => ({ ...previous, zone: event.target.value }))} required />
+          )}
           <Input label="Temporary password" type="password" minLength={8} value={form.password}
             onChange={event => setForm(previous => ({ ...previous, password: event.target.value }))} required />
           <div className="flex justify-end gap-2 pt-2">
@@ -200,6 +228,10 @@ export default function UserManagementPage() {
         <form onSubmit={changeRole} className="flex flex-col gap-3">
           <Select label="Access role" value={newRole} options={roleOptions}
             onChange={event => setNewRole(event.target.value as Role)} />
+          {newRole === 'zonal_user' && (
+            <Select label="Assigned zone" value={newZone} options={ZONES.map(zone => ({ value: zone, label: zone }))}
+              placeholder="Select zone" onChange={event => setNewZone(event.target.value)} required />
+          )}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" onClick={closeModal}>Cancel</Button>
             <Button type="submit">Update Role</Button>

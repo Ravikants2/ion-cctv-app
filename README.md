@@ -96,8 +96,11 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 - Installation Record (single entry + bulk upload)
 - Exam date-wise candidate tracking
 - Quotation PDF upload and view
+- Two-stage quote approvals (Surveillance Head → Head of Enablement), with send-back, mandatory exception/blanket remarks, and immutable quote revision history
+- Approval comparisons for previous venue costs and quotations, vendor reuse across locations, and project-level total/per-candidate cost rankings
+- Zonal user accounts restricted to their assigned zone across Requirements, Records, and Vendors; returned quotes require a resubmission note
 - Excel export + PDF/Print reports (A4 landscape)
-- Role-based access: Super Admin / Sub Admin / User / Viewer
+- Role-based access: Super Admin / Sub Admin / User / Viewer / Zonal User / Surveillance Head / Head of Enablement
 - Backup & Restore (JSON download/upload from header menu)
 - All data synced to GitHub `data` branch
 - Gemini-powered chat over structured application records

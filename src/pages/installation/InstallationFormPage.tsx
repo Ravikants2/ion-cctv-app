@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Input, Select, Textarea } from '../../components/ui/FormFields';
 import { Alert } from '../../components/ui/index';
-import type { InstallationRecord, ExamDateDetail, InstallationType, StorageType, StorageUnit } from '../../types';
+import type { AppData, InstallationRecord, ExamDateDetail, InstallationType, StorageType, StorageUnit, QuoteRevision } from '../../types';
 import { Plus, Trash2, FileText, Eye } from 'lucide-react';
 import { normalizeExamDate } from '../../utils/dates';
 import { sameZone } from '../../utils/vendorCode';
@@ -70,7 +70,7 @@ export default function InstallationFormPage() {
       if (existingRecord.storageUnit) setStorageUnit(existingRecord.storageUnit);
       setLocalVendorCost(existingRecord.localVendorCost);
       if (existingRecord.minimumCost !== undefined) setMinimumCost(existingRecord.minimumCost);
-      setRemarks(existingRecord.remarks || '');
+      setRemarks(existingRecord.approvalStatus === 'returned' ? '' : existingRecord.remarks || '');
       setExistingQuotationId(existingRecord.quotationFileId);
       const dates = data.examDates.filter(d => d.installationRecordId === existingRecord.id);
       setExamDates(dates.map(d => ({ id: d.id, examDate: normalizeExamDate(d.examDate) || '', scheduledCandidates: d.scheduledCandidates })));
@@ -78,11 +78,21 @@ export default function InstallationFormPage() {
   }, [existingRecord, data]);
 
   // Derived data
-  const clients = [...new Set(data.requirements.map(r => r.clientName))].sort();
-  const exams = [...new Set(data.requirements.filter(r => !selectedClient || r.clientName === selectedClient).map(r => r.examName))].sort();
-  const venues = data.requirements.filter(r => r.clientName === selectedClient && r.examName === selectedExam);
-  const selectedReq = data.requirements.find(r => r.id === selectedReqId);
+  const scopedRequirements = data.requirements.filter(r => currentUser?.role !== 'zonal_user' || r.zone === currentUser.zone);
+  const clients = [...new Set(scopedRequirements.map(r => r.clientName))].sort();
+  const exams = [...new Set(scopedRequirements.filter(r => !selectedClient || r.clientName === selectedClient).map(r => r.examName))].sort();
+  const venues = scopedRequirements.filter(r => r.clientName === selectedClient && r.examName === selectedExam);
+  const selectedReq = scopedRequirements.find(r => r.id === selectedReqId);
   const zoneVendors = data.vendors.filter(v => selectedReq && sameZone(v.zone, selectedReq.zone));
+  const canEditRecord = !existingRecord || currentUser?.role !== 'zonal_user' ||
+    (existingRecord.approvalStatus === 'returned' &&
+      data.requirements.find(requirement => requirement.id === existingRecord.requirementId)?.zone === currentUser.zone);
+  const lastSendBack = existingRecord
+    ? data.approvalEvents
+      .filter(event => event.installationRecordId === existingRecord.id && event.action === 'sent_back')
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+    : undefined;
+  const lastApprover = lastSendBack ? data.users.find(user => user.id === lastSendBack.userId) : undefined;
 
   // Duplicate check on venue selection
   const handleVenueSelect = (reqId: string) => {
@@ -141,34 +151,83 @@ export default function InstallationFormPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedReqId) { setAlert({ type: 'error', msg: 'Please select a venue.' }); return; }
+    if (!scopedRequirements.some(requirement => requirement.id === selectedReqId)) {
+      setAlert({ type: 'error', msg: 'You can only submit a quote for a venue in your assigned zone.' });
+      return;
+    }
     if (!vendorId) { setAlert({ type: 'error', msg: 'Please select a vendor.' }); return; }
     if (examDates.filter(d => d.examDate).length === 0) { setAlert({ type: 'error', msg: 'At least one exam date is required.' }); return; }
     if (localVendorCost === '' || Number(localVendorCost) < 0) { setAlert({ type: 'error', msg: 'Local vendor cost is required.' }); return; }
+    if (existingRecord?.approvalStatus === 'returned' && !remarks.trim()) {
+      setAlert({ type: 'error', msg: 'Remarks are mandatory when resubmitting a returned quote, including when there are no changes.' });
+      return;
+    }
 
     setSaving(true);
     try {
       let quotationFileId = existingQuotationId;
+      let newQuotation: AppData['quotations'][number] | undefined;
 
       if (quotationFile) {
         const dataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
-          reader.onload = e => resolve(e.target?.result as string);
-          reader.onerror = reject;
+          reader.onload = () => {
+            if (typeof reader.result === 'string') resolve(reader.result);
+            else reject(new Error('The quotation could not be read as a data URL.'));
+          };
+          reader.onerror = () => reject(reader.error || new Error('Failed to read the quotation PDF.'));
           reader.readAsDataURL(quotationFile);
         });
         quotationFileId = uuidv4();
-        updateData(prev => ({
-          ...prev,
-          quotations: [...prev.quotations.filter(q => q.id !== existingQuotationId), {
-            id: quotationFileId!, installationRecordId: isEdit ? id! : '',
-            originalFileName: quotationFile.name, dataUrl, mimeType: 'application/pdf',
-            uploadedBy: currentUser!.id, uploadedAt: new Date().toISOString(),
-          }],
-        }));
+        newQuotation = {
+          id: quotationFileId, installationRecordId: isEdit ? id! : '',
+          originalFileName: quotationFile.name, dataUrl, mimeType: 'application/pdf',
+          uploadedBy: currentUser!.id, uploadedAt: new Date().toISOString(),
+        };
       }
 
       const now = new Date().toISOString();
       const recordId = isEdit ? id! : uuidv4();
+      const submittedDates = examDates
+        .filter(d => d.examDate)
+        .map(d => ({ examDate: d.examDate, scheduledCandidates: Number(d.scheduledCandidates) || 0 }));
+      const revision: QuoteRevision = {
+        id: uuidv4(),
+        installationRecordId: recordId,
+        createdAt: now,
+        createdBy: currentUser!.id,
+        remarks: remarks.trim() || undefined,
+        vendorId,
+        localVendorCost: Number(localVendorCost),
+        minimumCost: minimumCost !== '' ? Number(minimumCost) : undefined,
+        quotationFileId,
+        installationType,
+        cameraCount: Number(cameraCount),
+        totalCandidates: submittedDates.reduce((total, date) => total + date.scheduledCandidates, 0),
+        examDates: submittedDates,
+      };
+      const legacyRevision: QuoteRevision | undefined = existingRecord &&
+        !data.quoteRevisions.some(item => item.installationRecordId === existingRecord.id)
+        ? {
+            id: uuidv4(),
+            installationRecordId: existingRecord.id,
+            createdAt: existingRecord.updatedAt,
+            createdBy: existingRecord.updatedBy,
+            remarks: existingRecord.remarks,
+            vendorId: existingRecord.vendorId,
+            localVendorCost: existingRecord.localVendorCost,
+            minimumCost: existingRecord.minimumCost,
+            quotationFileId: existingRecord.quotationFileId,
+            installationType: existingRecord.installationType,
+            cameraCount: existingRecord.cameraCount,
+            totalCandidates: data.examDates
+              .filter(date => date.installationRecordId === existingRecord.id)
+              .reduce((total, date) => total + date.scheduledCandidates, 0),
+            examDates: data.examDates
+              .filter(date => date.installationRecordId === existingRecord.id)
+              .map(date => ({ examDate: date.examDate, scheduledCandidates: date.scheduledCandidates })),
+          }
+        : undefined;
 
       const record: InstallationRecord = {
         id: recordId,
@@ -191,6 +250,10 @@ export default function InstallationFormPage() {
         createdAt: isEdit ? (existingRecord?.createdAt || now) : now,
         updatedBy: currentUser!.id,
         updatedAt: now,
+        approvalStatus: 'pending',
+        approvalStage: existingRecord?.approvalStatus === 'returned'
+          ? existingRecord.approvalStage || 'surveillance_head'
+          : 'surveillance_head',
       };
 
       const newExamDates: ExamDateDetail[] = examDates
@@ -202,16 +265,28 @@ export default function InstallationFormPage() {
           ? prev.installations.map(i => i.id === recordId ? record : i)
           : [...prev.installations, record];
         const otherDates = prev.examDates.filter(d => d.installationRecordId !== recordId);
-        // Fix quotation installationRecordId
-        const quotations = prev.quotations.map(q => q.id === quotationFileId ? { ...q, installationRecordId: recordId } : q);
-        return { ...prev, installations, examDates: [...otherDates, ...newExamDates], quotations };
+        const quotations = [
+          ...prev.quotations,
+          ...(newQuotation ? [newQuotation] : []),
+        ].map(q => q.id === quotationFileId ? { ...q, installationRecordId: recordId } : q);
+        const quoteRevisions = legacyRevision ? [...prev.quoteRevisions, legacyRevision] : prev.quoteRevisions;
+        return {
+          ...prev,
+          installations,
+          examDates: [...otherDates, ...newExamDates],
+          quotations,
+          quoteRevisions: [...quoteRevisions, revision],
+        };
       });
 
-      addAuditLog(isEdit ? 'UPDATE' : 'CREATE', 'InstallationRecord', recordId, existingRecord, record);
-      setAlert({ type: 'success', msg: `Record ${isEdit ? 'updated' : 'created'} successfully.` });
+      addAuditLog(isEdit ? 'UPDATE' : 'CREATE', 'InstallationRecord', recordId, existingRecord, {
+        ...record,
+        quoteRevisionId: revision.id,
+      });
+      setAlert({ type: 'success', msg: `Quote ${isEdit ? 'resubmitted' : 'submitted'} for Surveillance Head approval.` });
       setTimeout(() => navigate('/records'), 1200);
-    } catch {
-      setAlert({ type: 'error', msg: 'Failed to save record.' });
+    } catch (error) {
+      setAlert({ type: 'error', msg: `Failed to save record: ${error instanceof Error ? error.message : 'Unknown error'}` });
     } finally {
       setSaving(false);
     }
@@ -224,6 +299,14 @@ export default function InstallationFormPage() {
         <h1 className="text-xl font-bold text-gray-900">{isEdit ? 'Edit Installation Record' : 'New Installation Record'}</h1>
       </div>
 
+      {!canEditRecord && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+          <Alert type="error">This record is outside your assigned zone or has not been sent back for changes.</Alert>
+          <Button className="mt-3" variant="secondary" onClick={() => navigate('/records')}>Back to Records</Button>
+        </div>
+      )}
+
+      {canEditRecord && <>
       {alert && <div className="mb-4"><Alert type={alert.type} onClose={() => setAlert(null)}>{alert.msg}</Alert></div>}
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -337,7 +420,20 @@ export default function InstallationFormPage() {
         <section className="bg-white border rounded-xl p-5 shadow-sm">
           <h2 className="font-semibold text-gray-800 mb-4">Supporting Information</h2>
           <div className="space-y-4">
-            <Textarea label="Remarks" value={remarks} onChange={e => setRemarks(e.target.value)} rows={3} />
+            {existingRecord?.approvalStatus === 'returned' && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                This quote was sent back by {existingRecord.approvalStage === 'enablement_head' ? 'Head of Enablement' : 'Surveillance Head'}.
+                Explain what changed, or state that there are no changes. Remarks are mandatory.
+                {lastSendBack?.remarks && (
+                  <p className="mt-2 border-t border-amber-200 pt-2">
+                    Return note from {lastApprover?.name || 'approver'}: {lastSendBack.remarks}
+                  </p>
+                )}
+              </div>
+            )}
+            <Textarea label={existingRecord?.approvalStatus === 'returned' ? 'Resubmission remarks (required)' : 'Remarks'}
+              value={remarks} onChange={e => setRemarks(e.target.value)} rows={3}
+              required={existingRecord?.approvalStatus === 'returned'} />
             <div>
               <label className="text-sm font-medium text-gray-700 block mb-1">Quotation PDF (optional)</label>
               <div className="flex items-center gap-3">
@@ -362,6 +458,7 @@ export default function InstallationFormPage() {
           <Button type="submit" disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Update Record' : 'Save Record'}</Button>
         </div>
       </form>
+      </>}
     </div>
   );
 }

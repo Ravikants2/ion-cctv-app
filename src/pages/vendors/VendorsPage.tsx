@@ -26,10 +26,14 @@ export default function VendorsPage() {
   const [formError, setFormError] = useState('');
   const [page, setPage] = useState(1);
 
-  const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
-  const knownZones = [...new Set([...zones, ...data.vendors.map(vendor => vendor.zone)])];
+  const scopedRequirements = data.requirements.filter(r => currentUser?.role !== 'zonal_user' || r.zone === currentUser.zone);
+  const scopedVendors = data.vendors.filter(vendor => currentUser?.role !== 'zonal_user' || vendor.zone === currentUser.zone);
+  const zones = currentUser?.role === 'zonal_user' && currentUser.zone
+    ? [currentUser.zone]
+    : [...new Set(scopedRequirements.map(r => r.zone))].sort();
+  const knownZones = [...new Set([...zones, ...scopedVendors.map(vendor => vendor.zone)])];
 
-  const filtered = data.vendors.filter(v => {
+  const filtered = scopedVendors.filter(v => {
     if (filterZone && v.zone !== filterZone) return false;
     if (search && !v.vendorName.toLowerCase().includes(search.toLowerCase()) &&
       !v.zone.toLowerCase().includes(search.toLowerCase()) &&
@@ -159,7 +163,7 @@ export default function VendorsPage() {
         <h1 className="text-xl font-bold text-gray-900">Zone-wise Vendor Master</h1>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => downloadTemplate('vendor')}><Download size={14} /> Template</Button>
-          <Button variant="outline" size="sm" onClick={() => exportVendorsToExcel(data.vendors)}><Download size={14} /> Download Data</Button>
+          <Button variant="outline" size="sm" onClick={() => exportVendorsToExcel(scopedVendors)}><Download size={14} /> Download Data</Button>
           {can('upload_master') && (
             <>
               <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Upload</Button>

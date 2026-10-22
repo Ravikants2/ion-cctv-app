@@ -114,13 +114,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const can = useCallback((action: string): boolean => {
     if (!currentUser) return false;
     const role: Role = currentUser.role;
+    const isAdmin = role === 'super_admin' || role === 'sub_admin';
     switch (action) {
       case 'delete_master':      return role === 'super_admin';
       case 'upload_master':      return role === 'super_admin' || role === 'sub_admin';
-      case 'create_installation':return role !== 'viewer';
-      case 'edit_installation':  return role !== 'viewer';
+      case 'create_installation':return !['viewer', 'surveillance_head', 'enablement_head'].includes(role);
+      case 'edit_installation':  return !['viewer', 'surveillance_head', 'enablement_head'].includes(role);
       case 'view_dashboard':     return true;
       case 'manage_users':       return role === 'super_admin';
+      case 'view_approvals':     return isAdmin || role === 'surveillance_head' || role === 'enablement_head';
+      case 'approve_surveillance': return isAdmin || role === 'surveillance_head';
+      case 'approve_enablement':   return isAdmin || role === 'enablement_head';
       default: return false;
     }
   }, [currentUser]);

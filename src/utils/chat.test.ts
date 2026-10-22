@@ -34,6 +34,9 @@ const appData: AppData = {
     originalFileName: 'private.pdf', dataUrl: 'data:application/pdf;base64,secret',
     mimeType: 'application/pdf', uploadedBy: 'user-1', uploadedAt: '2026-01-01',
   }],
+  quoteRevisions: [],
+  approvalEvents: [],
+  blanketApprovals: [],
   auditLogs: [{
     id: 'audit-1', userId: 'user-1', action: 'LOGIN', entityType: 'User',
     entityId: 'user-1', timestamp: '2026-01-01',
