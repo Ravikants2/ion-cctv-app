@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppData } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -54,17 +54,23 @@ const initialData: AppData = {
 };
 
 describe('ApprovalsPage', () => {
+  let mockData = initialData;
   let updatedData: AppData | undefined;
   let updateData: (updater: (previous: AppData) => AppData) => void;
 
   beforeEach(() => {
+    mockData = initialData;
     updatedData = undefined;
     updateData = vi.fn((updater: (previous: AppData) => AppData) => {
-      updatedData = updater(initialData);
+      updatedData = updater(mockData);
     });
+    mockAuthData(mockData);
+  });
+
+  function mockAuthData(data: AppData) {
     vi.mocked(useAuth).mockReturnValue({
       currentUser: initialData.users[0],
-      data: initialData,
+      data,
       syncStatus: 'idle',
       syncError: '',
       isGitHub: false,
@@ -75,17 +81,20 @@ describe('ApprovalsPage', () => {
       can: (action: string) => action === 'view_approvals' || action === 'approve_surveillance',
       reloadFromGitHub: async () => undefined,
     });
-  });
+  }
 
   it('requires remarks for abnormal cost approval and advances to Head of Enablement', () => {
     render(<ApprovalsPage />);
 
-    expect(screen.getByText(/25% higher than the previous quote/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Cost alert details for TC Code TC-100/ }));
+    expect(screen.getByText(/Current quote increased 25% compared with its previous quote/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Close/i }));
+
     fireEvent.click(screen.getByRole('button', { name: /Approve and forward/ }));
-    expect(screen.getByText(/Remarks are mandatory for an abnormal or exception approval/)).toBeInTheDocument();
+    expect(screen.getByText(/Remarks are mandatory when approving a cost alert or exception/)).toBeInTheDocument();
     expect(updateData).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks for TC Code TC-100' }), {
       target: { value: 'Reviewed the increase against the updated venue setup.' },
     });
     fireEvent.click(screen.getByRole('button', { name: /Approve and forward/ }));
@@ -102,14 +111,14 @@ describe('ApprovalsPage', () => {
   it('requires a reason when sending a quote back to the zone', () => {
     render(<ApprovalsPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Send back to zone/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Send back/ }));
     expect(screen.getByText('Remarks are mandatory when sending a quote back.')).toBeInTheDocument();
     expect(updateData).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks for TC Code TC-100' }), {
       target: { value: 'Please confirm the camera count and update the quote.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Send back to zone/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Send back/ }));
 
     expect(updatedData?.installations[0].approvalStatus).toBe('returned');
     expect(updatedData?.installations[0].approvalStage).toBe('surveillance_head');
@@ -124,17 +133,16 @@ describe('ApprovalsPage', () => {
 
     fireEvent.change(screen.getByLabelText('Client Name'), { target: { value: 'Client' } });
     fireEvent.change(screen.getByLabelText('Exam Name'), { target: { value: 'Exam' } });
-    fireEvent.click(screen.getByLabelText('Select all 1 matching TC venues'));
-    fireEvent.click(screen.getByRole('button', { name: /Approve selected venues \(1\)/ }));
+    fireEvent.click(screen.getByLabelText('Select all matching venues'));
+    fireEvent.click(screen.getByRole('button', { name: /Approve selected \(1\)/ }));
 
-    expect(screen.getByText(/remarks for each selected venue with a cost discrepancy/i)).toBeInTheDocument();
-    expect(screen.getByText(/Enter approval remarks for each selected venue/i)).toBeInTheDocument();
+    expect(screen.getByText(/Enter approval remarks for each selected venue with a cost alert/i)).toBeInTheDocument();
     expect(updateData).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks for TC Code TC-100' }), {
       target: { value: 'Reviewed the venue increase against the updated scope.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Approve selected venues \(1\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Approve selected \(1\)/ }));
 
     expect(updatedData?.installations[0].approvalStage).toBe('enablement_head');
     expect(updatedData?.approvalEvents[0]).toMatchObject({
@@ -142,5 +150,43 @@ describe('ApprovalsPage', () => {
       remarks: 'Reviewed the venue increase against the updated scope.',
       stage: 'surveillance_head',
     });
+  });
+
+  it('shows all temporary CCTV days and aggregates recorded cost across venue installations', () => {
+    const pastInstallation = {
+      ...initialData.installations[0],
+      id: 'past-installation',
+      localVendorCost: 8000,
+      createdAt: '2025-12-01',
+      updatedAt: '2025-12-02',
+      approvalStatus: 'approved' as const,
+      approvalStage: undefined,
+    };
+    mockData = {
+      ...initialData,
+      installations: [...initialData.installations, pastInstallation],
+      examDates: [
+        ...initialData.examDates,
+        ...Array.from({ length: 5 }, (_, index) => ({
+          id: `past-date-${index + 1}`,
+          installationRecordId: pastInstallation.id,
+          examDate: `2025-12-0${index + 1}`,
+          scheduledCandidates: 100,
+        })),
+      ],
+    };
+    mockAuthData(mockData);
+
+    render(<ApprovalsPage />);
+
+    expect(screen.getByText('6', { selector: 'td' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Past costs/ }));
+
+    const details = within(screen.getByRole('dialog'));
+    expect(details.getByText('Total recorded cost till now').parentElement).toHaveTextContent('₹20,500');
+    expect(details.getByText('Cost per candidate till now').parentElement).toHaveTextContent('₹20.5');
+    expect(details.getByText('Temporary CCTV days').parentElement).toHaveTextContent('6');
+    expect(details.getByText('01 Dec 2025')).toBeInTheDocument();
+    expect(details.getByText('05 Dec 2025')).toBeInTheDocument();
   });
 });
