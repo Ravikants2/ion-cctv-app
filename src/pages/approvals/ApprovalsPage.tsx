@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Alert, Modal } from '../../components/ui/index';
+import { Alert, KPICard, Modal } from '../../components/ui/index';
 import { Button } from '../../components/ui/Button';
 import { Input, Select, Textarea } from '../../components/ui/FormFields';
 import { TablePagination } from '../../components/ui/TablePagination';
 import { useAuth } from '../../context/AuthContext';
 import { formatExamDate, normalizeExamDate } from '../../utils/dates';
 import type { ApprovalEvent, ApprovalStage, ApprovalStatus, InstallationRecord, QuoteRevision } from '../../types';
-import { AlertCircle, Check, CornerUpLeft, History } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, Clock3, CornerUpLeft, History } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 
@@ -55,6 +55,7 @@ export default function ApprovalsPage() {
   const [exceptionByRecord, setExceptionByRecord] = useState<Record<string, boolean>>({});
   const [detailRecordId, setDetailRecordId] = useState('');
   const [alertRecordId, setAlertRecordId] = useState('');
+  const [approvalDrilldown, setApprovalDrilldown] = useState<'approved' | 'pending' | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const indexes = useMemo(() => {
@@ -74,6 +75,13 @@ export default function ApprovalsPage() {
       schedulesByRecord.set(schedule.installationRecordId, dates);
     });
     const installationsById = new Map(data.installations.map(record => [record.id, record]));
+    const approvalEventsByRecord = new Map<string, ApprovalEvent[]>();
+    data.approvalEvents.forEach(event => {
+      const events = approvalEventsByRecord.get(event.installationRecordId) || [];
+      events.push(event);
+      approvalEventsByRecord.set(event.installationRecordId, events);
+    });
+    approvalEventsByRecord.forEach(events => events.sort((left, right) => left.createdAt.localeCompare(right.createdAt)));
     const candidatesByRecord = new Map<string, number>();
     data.installations.forEach(record => {
       const history = revisionsByRecord.get(record.id) || [];
@@ -105,7 +113,7 @@ export default function ApprovalsPage() {
       if (!requirement) return;
       venueMetrics.get(venueProjectKey(requirement))?.days.add(normalizeExamDate(schedule.examDate) || schedule.examDate);
     });
-    return { requirementsById, vendorsById, revisionsByRecord, schedulesByRecord, candidatesByRecord, venueMetrics, projectRecords, installationsById };
+    return { requirementsById, vendorsById, revisionsByRecord, schedulesByRecord, candidatesByRecord, venueMetrics, projectRecords, installationsById, approvalEventsByRecord };
   }, [data]);
 
   const allowedStages: ApprovalStage[] = [
@@ -141,6 +149,8 @@ export default function ApprovalsPage() {
   const pageQueue = filteredQueue.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const selectedQueue = filteredQueue.filter(record => selectedIds.includes(record.id));
   const allFilteredSelected = filteredQueue.length > 0 && selectedQueue.length === filteredQueue.length;
+  const approvedRecords = data.installations.filter(record => record.approvalStatus === 'approved');
+  const waitingRecords = data.installations.filter(record => (record.approvalStatus || 'pending') === 'pending');
   const selectedRecord = filteredQueue.find(record => record.id === selectedId) || pageQueue[0];
   const selectedRequirement = selectedRecord
     ? indexes.requirementsById.get(selectedRecord.requirementId)
@@ -182,6 +192,27 @@ export default function ApprovalsPage() {
   const totalCostPerCandidate = totalVenueCandidates > 0
     ? totalVenueCost / totalVenueCandidates
     : 0;
+  const createCurrentQuoteSnapshot = (record: InstallationRecord): QuoteRevision => {
+    const schedule = indexes.schedulesByRecord.get(record.id) || [];
+    return {
+      id: uuidv4(),
+      installationRecordId: record.id,
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser!.id,
+      remarks: record.remarks,
+      vendorId: record.vendorId,
+      localVendorCost: record.localVendorCost,
+      minimumCost: record.minimumCost,
+      quotationFileId: record.quotationFileId,
+      installationType: record.installationType,
+      cameraCount: record.cameraCount,
+      totalCandidates: schedule.reduce((total, item) => total + item.scheduledCandidates, 0),
+      examDates: schedule.map(item => ({
+        examDate: item.examDate,
+        scheduledCandidates: item.scheduledCandidates,
+      })),
+    };
+  };
 
   const currentApprovalEvents = selectedRecord
     ? data.approvalEvents
@@ -219,11 +250,8 @@ export default function ApprovalsPage() {
       setAlert({ type: 'error', message: 'Cost alerts require an explicit exception approval.' });
       return;
     }
-    const revision = recordRevisionHistory[recordRevisionHistory.length - 1];
-    if (!revision) {
-      setAlert({ type: 'error', message: 'This quote has no saved revision snapshot and cannot be approved.' });
-      return;
-    }
+    const revision = recordRevisionHistory[recordRevisionHistory.length - 1] || createCurrentQuoteSnapshot(record);
+    const isNewRevision = recordRevisionHistory.length === 0;
     const event: ApprovalEvent = {
       id: uuidv4(),
       installationRecordId: record.id,
@@ -241,6 +269,7 @@ export default function ApprovalsPage() {
       : nextStage ? 'pending' : 'approved';
     updateData(previous => ({
       ...previous,
+      quoteRevisions: isNewRevision ? [...previous.quoteRevisions, revision] : previous.quoteRevisions,
       installations: previous.installations.map(item => item.id === record.id
         ? {
             ...item,
@@ -282,7 +311,7 @@ export default function ApprovalsPage() {
         ? can('approve_surveillance')
         : can('approve_enablement');
       const history = indexes.revisionsByRecord.get(record.id) || [];
-      const revision = history[history.length - 1];
+      const revision = history[history.length - 1] || createCurrentQuoteSnapshot(record);
       const requirement = indexes.requirementsById.get(record.requirementId);
       const flags = getCostFlags(
         record,
@@ -296,14 +325,12 @@ export default function ApprovalsPage() {
       const hasException = Boolean(exceptionByRecord[record.id]);
       const reason = !allowed
         ? 'You do not have permission for its approval stage'
-        : !revision
-          ? 'No saved quote revision is available'
-          : flags.length > 0 && (!hasRemarks || !hasException)
+        : flags.length > 0 && (!hasRemarks || !hasException)
             ? 'Cost alert requires remarks and exception approval'
             : hasException && !hasRemarks
               ? 'Exception approval requires remarks'
               : '';
-      return { record, stage, revision, reason };
+      return { record, stage, revision, isNewRevision: history.length === 0, reason };
     });
     const skipped = approvalChecks.filter(item => item.reason);
     const approved = approvalChecks.filter(item => !item.reason);
@@ -339,6 +366,10 @@ export default function ApprovalsPage() {
     const eventsByRecord = new Map(events.map(event => [event.installationRecordId, event]));
     updateData(previous => ({
       ...previous,
+      quoteRevisions: [
+        ...previous.quoteRevisions,
+        ...approved.filter(item => item.isNewRevision).map(item => item.revision),
+      ],
       installations: previous.installations.map(record => {
         const event = eventsByRecord.get(record.id);
         if (!event) return record;
@@ -408,6 +439,12 @@ export default function ApprovalsPage() {
         : []
     )
     : [];
+  const approvalDrilldownRecords = approvalDrilldown === 'approved' ? approvedRecords : waitingRecords;
+  const waitingByStage = {
+    surveillance_head: waitingRecords.filter(record => (record.approvalStage || 'surveillance_head') === 'surveillance_head').length,
+    enablement_head: waitingRecords.filter(record => record.approvalStage === 'enablement_head').length,
+  };
+
   return (
     <div className="space-y-5">
       <header>
@@ -415,6 +452,25 @@ export default function ApprovalsPage() {
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Approvals</h1>
         <p className="mt-1 text-sm text-slate-500">Review venue location, temporary CCTV days, recorded cost, vendor history, and approval remarks.</p>
       </header>
+
+      <section className="grid gap-3 sm:grid-cols-2" aria-label="Approval status overview">
+        <KPICard
+          title="Approved"
+          value={approvedRecords.length.toLocaleString('en-IN')}
+          subtitle="Completed both approval levels · click to inspect"
+          icon={<CheckCircle2 size={20} />}
+          color="green"
+          onClick={() => setApprovalDrilldown('approved')}
+        />
+        <KPICard
+          title="Waiting for approval"
+          value={waitingRecords.length.toLocaleString('en-IN')}
+          subtitle={`${waitingByStage.surveillance_head} with Surveillance Head · ${waitingByStage.enablement_head} with Head of Enablement · click to inspect`}
+          icon={<Clock3 size={20} />}
+          color="orange"
+          onClick={() => setApprovalDrilldown('pending')}
+        />
+      </section>
 
       {alert && <Alert type={alert.type} onClose={() => setAlert(null)}>{alert.message}</Alert>}
 
@@ -544,6 +600,12 @@ export default function ApprovalsPage() {
                         <td className="whitespace-normal px-3 py-4">
                           <p className="font-semibold tabular-nums text-slate-900">{money(record.localVendorCost)}</p>
                           <p className="mt-1 text-xs text-slate-500">Installation quote</p>
+                          <p className="mt-3 font-medium tabular-nums text-slate-800">
+                            {(indexes.candidatesByRecord.get(record.id) || 0) > 0
+                              ? money(record.localVendorCost / (indexes.candidatesByRecord.get(record.id) || 1))
+                              : 'Unavailable'}
+                          </p>
+                          <p className="text-xs text-slate-500">Cost per candidate</p>
                           <p className="mt-3 font-medium text-slate-800">{days} {days === 1 ? 'day' : 'days'}</p>
                           <p className="text-xs text-slate-500">Temporary CCTV</p>
                         </td>
@@ -894,6 +956,67 @@ export default function ApprovalsPage() {
             }}><History size={13} /> Open venue cost history</Button>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={Boolean(approvalDrilldown)}
+        onClose={() => setApprovalDrilldown(null)}
+        title={approvalDrilldown === 'approved' ? 'Approved venues' : 'Venues waiting for approval'}
+        size="xl"
+      >
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto">
+          <p className="text-sm text-slate-600">
+            {approvalDrilldown === 'approved'
+              ? 'Approval history for venues that have completed both levels.'
+              : 'Each pending venue shows the approval stage and role currently responsible for review.'}
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                <tr>
+                  {['TC venue', 'Client · exam', 'Zone', approvalDrilldown === 'approved' ? 'Last approved by' : 'Waiting with', 'Current quote'].map(label => (
+                    <th key={label} className="whitespace-normal px-3 py-3">{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {approvalDrilldownRecords.map(record => {
+                  const requirement = indexes.requirementsById.get(record.requirementId);
+                  if (!requirement) return null;
+                  const events = indexes.approvalEventsByRecord.get(record.id) || [];
+                  const lastApprovedEvent = [...events].reverse().find(event => event.action === 'approved');
+                  const approverName = lastApprovedEvent
+                    ? data.users.find(user => user.id === lastApprovedEvent.userId)?.name || 'Former user'
+                    : 'Approval history unavailable';
+                  const waitingStage = record.approvalStage || 'surveillance_head';
+                  return (
+                    <tr key={record.id} className="border-t border-slate-100 align-top">
+                      <td className="px-3 py-3">
+                        <p className="font-mono text-xs font-semibold text-blue-700">TC {requirement.tcCode}</p>
+                        <p className="mt-1 whitespace-normal font-medium text-slate-900">{requirement.tcName}</p>
+                        <p className="mt-1 text-xs text-slate-500">{requirement.city}, {requirement.state}</p>
+                      </td>
+                      <td className="whitespace-normal px-3 py-3">{requirement.clientName} · {requirement.examName}</td>
+                      <td className="px-3 py-3">{requirement.zone}</td>
+                      <td className="whitespace-normal px-3 py-3">
+                        {approvalDrilldown === 'approved'
+                          ? approverName
+                          : <span className="font-medium text-amber-800">{stageTitle[waitingStage]}</span>}
+                        {approvalDrilldown === 'approved' && lastApprovedEvent && (
+                          <p className="mt-1 text-xs text-slate-500">{stageTitle[lastApprovedEvent.stage]}</p>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 font-medium">{money(record.localVendorCost)}</td>
+                    </tr>
+                  );
+                })}
+                {approvalDrilldownRecords.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">No venues in this approval status.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </Modal>
     </div>
   );

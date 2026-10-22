@@ -131,6 +131,24 @@ describe('ApprovalsPage', () => {
     });
   });
 
+  it('creates a current quote snapshot and completes approval for a legacy record without revisions', () => {
+    mockData = { ...initialData, quoteRevisions: [] };
+    mockAuthData(mockData);
+    render(<ApprovalsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Approve$/ }));
+
+    const savedRevision = updatedData?.quoteRevisions.find(revision => revision.installationRecordId === 'installation-1');
+    expect(savedRevision).toMatchObject({
+      localVendorCost: 12500,
+      vendorId: 'vendor-1',
+      installationType: 'Full Vendor',
+      totalCandidates: 500,
+    });
+    expect(updatedData?.approvalEvents[0].quoteRevisionId).toBe(savedRevision?.id);
+    expect(updatedData?.installations[0].approvalStage).toBe('enablement_head');
+  });
+
   it('approves one venue at a time and requires remarks for cost discrepancies', () => {
     render(<ApprovalsPage />);
 
@@ -276,16 +294,7 @@ describe('ApprovalsPage', () => {
         ...initialData.examDates,
         { id: 'date-2', installationRecordId: secondInstallation.id, examDate: '2026-02-01', scheduledCandidates: 5000 },
       ],
-      quoteRevisions: [
-        ...initialData.quoteRevisions,
-        {
-          ...initialData.quoteRevisions[1],
-          id: 'revision-3',
-          installationRecordId: secondInstallation.id,
-          localVendorCost: 5000,
-          totalCandidates: 5000,
-        },
-      ],
+      quoteRevisions: initialData.quoteRevisions,
     };
     mockAuthData(mockData);
 
@@ -299,6 +308,39 @@ describe('ApprovalsPage', () => {
     expect(updatedData?.installations.find(record => record.id === 'installation-1')?.approvalStage).toBe('surveillance_head');
     expect(updatedData?.installations.find(record => record.id === 'installation-2')?.approvalStage).toBe('enablement_head');
     expect(updatedData?.approvalEvents.map(event => event.installationRecordId)).toEqual(['installation-2']);
+    expect(updatedData?.quoteRevisions.some(revision => revision.installationRecordId === 'installation-2')).toBe(true);
     expect(screen.getByText('1 venue approved; 1 skipped.')).toBeInTheDocument();
+  });
+
+  it('drills into approved and pending counts with approval owner details', () => {
+    const approvedInstallation = {
+      ...initialData.installations[0],
+      id: 'approved-installation',
+      approvalStatus: 'approved' as const,
+      approvalStage: undefined,
+    };
+    mockData = {
+      ...initialData,
+      installations: [...initialData.installations, approvedInstallation],
+      approvalEvents: [{
+        id: 'approved-event',
+        installationRecordId: approvedInstallation.id,
+        stage: 'enablement_head',
+        action: 'approved',
+        userId: initialData.users[0].id,
+        remarks: '',
+        quoteRevisionId: 'revision-2',
+        createdAt: '2026-01-03',
+      }],
+    };
+    mockAuthData(mockData);
+    render(<ApprovalsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Waiting for approval' }));
+    expect(within(screen.getByRole('dialog')).getByText('Surveillance Head')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Close/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Approved' }));
+    expect(within(screen.getByRole('dialog')).getByText('Surveillance Reviewer')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('Head of Enablement')).toBeInTheDocument();
   });
 });
