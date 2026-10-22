@@ -7,7 +7,7 @@ import { TablePagination } from '../../components/ui/TablePagination';
 import { useAuth } from '../../context/AuthContext';
 import { formatExamDate, normalizeExamDate } from '../../utils/dates';
 import type { ApprovalEvent, ApprovalStage, ApprovalStatus, InstallationRecord, QuoteRevision } from '../../types';
-import { AlertCircle, Check, CheckCircle2, Clock3, CornerUpLeft, History } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, Clock3, CornerUpLeft, History } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 
@@ -47,6 +47,7 @@ export default function ApprovalsPage() {
   const { data, updateData, addAuditLog, currentUser, can } = useAuth();
   const [clientFilter, setClientFilter] = useState('');
   const [examFilter, setExamFilter] = useState('');
+  const [zoneFilter, setZoneFilter] = useState('');
   const [tcCodeFilter, setTcCodeFilter] = useState('');
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState('');
@@ -55,7 +56,9 @@ export default function ApprovalsPage() {
   const [exceptionByRecord, setExceptionByRecord] = useState<Record<string, boolean>>({});
   const [detailRecordId, setDetailRecordId] = useState('');
   const [alertRecordId, setAlertRecordId] = useState('');
-  const [approvalDrilldown, setApprovalDrilldown] = useState<'approved' | 'pending' | null>(null);
+  const [approvalDrilldown, setApprovalDrilldown] = useState<'approved' | 'pending' | 'returned' | null>(null);
+  const [approvalDrilldownClient, setApprovalDrilldownClient] = useState('');
+  const [approvalDrilldownExam, setApprovalDrilldownExam] = useState('');
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const indexes = useMemo(() => {
@@ -138,10 +141,15 @@ export default function ApprovalsPage() {
       ? [requirement.examName]
       : [];
   }))].sort();
+  const zoneOptions = [...new Set(queue.flatMap(record => {
+    const requirement = indexes.requirementsById.get(record.requirementId);
+    return requirement ? [requirement.zone] : [];
+  }))].sort();
   const filteredQueue = queue.filter(record => {
     const requirement = indexes.requirementsById.get(record.requirementId);
     return (!clientFilter || requirement?.clientName === clientFilter) &&
       (!examFilter || requirement?.examName === examFilter) &&
+      (!zoneFilter || requirement?.zone === zoneFilter) &&
       (!tcCodeFilter || requirement?.tcCode.replace(/\D/g, '').includes(tcCodeFilter));
   });
   const pageCount = Math.max(1, Math.ceil(filteredQueue.length / PAGE_SIZE));
@@ -149,8 +157,8 @@ export default function ApprovalsPage() {
   const pageQueue = filteredQueue.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const selectedQueue = filteredQueue.filter(record => selectedIds.includes(record.id));
   const allFilteredSelected = filteredQueue.length > 0 && selectedQueue.length === filteredQueue.length;
-  const approvedRecords = data.installations.filter(record => record.approvalStatus === 'approved');
   const waitingRecords = data.installations.filter(record => (record.approvalStatus || 'pending') === 'pending');
+  const returnedRecords = data.installations.filter(record => record.approvalStatus === 'returned');
   const selectedRecord = filteredQueue.find(record => record.id === selectedId) || pageQueue[0];
   const selectedRequirement = selectedRecord
     ? indexes.requirementsById.get(selectedRecord.requirementId)
@@ -439,7 +447,52 @@ export default function ApprovalsPage() {
         : []
     )
     : [];
-  const approvalDrilldownRecords = approvalDrilldown === 'approved' ? approvedRecords : waitingRecords;
+  const currentApprovalStages = currentUser?.role === 'surveillance_head'
+    ? ['surveillance_head' as const]
+    : currentUser?.role === 'enablement_head'
+      ? ['enablement_head' as const]
+      : allowedStages;
+  const getLastStageEvent = (record: InstallationRecord, stage?: ApprovalStage) => {
+    const events = indexes.approvalEventsByRecord.get(record.id) || [];
+    return [...events].reverse().find(event => !stage || event.stage === stage);
+  };
+  const approvedAtCurrentLevel = data.installations.filter(record =>
+    currentApprovalStages.some(stage => getLastStageEvent(record, stage)?.action === 'approved')
+  );
+  const approvalDrilldownRecords = approvalDrilldown === 'approved'
+    ? approvedAtCurrentLevel
+    : approvalDrilldown === 'returned'
+      ? returnedRecords
+      : waitingRecords;
+  const scopedDrilldownRecords = approvalDrilldownRecords.filter(record => {
+    const requirement = indexes.requirementsById.get(record.requirementId);
+    return requirement &&
+      (!approvalDrilldownClient || requirement.clientName === approvalDrilldownClient) &&
+      (!approvalDrilldownExam || requirement.examName === approvalDrilldownExam);
+  });
+  const drilldownClientOptions = [...new Set(approvalDrilldownRecords.flatMap(record => {
+    const requirement = indexes.requirementsById.get(record.requirementId);
+    return requirement ? [requirement.clientName] : [];
+  }))].sort();
+  const drilldownExamOptions = [...new Set(approvalDrilldownRecords.flatMap(record => {
+    const requirement = indexes.requirementsById.get(record.requirementId);
+    return requirement && (!approvalDrilldownClient || requirement.clientName === approvalDrilldownClient)
+      ? [requirement.examName]
+      : [];
+  }))].sort();
+  const drilldownClientGroups = drilldownClientOptions.map(clientName => ({
+    clientName,
+    count: approvalDrilldownRecords.filter(record =>
+      indexes.requirementsById.get(record.requirementId)?.clientName === clientName
+    ).length,
+  }));
+  const drilldownExamGroups = drilldownExamOptions.map(examName => ({
+    examName,
+    count: approvalDrilldownRecords.filter(record => {
+      const requirement = indexes.requirementsById.get(record.requirementId);
+      return requirement?.clientName === approvalDrilldownClient && requirement.examName === examName;
+    }).length,
+  }));
   const waitingByStage = {
     surveillance_head: waitingRecords.filter(record => (record.approvalStage || 'surveillance_head') === 'surveillance_head').length,
     enablement_head: waitingRecords.filter(record => record.approvalStage === 'enablement_head').length,
@@ -453,14 +506,18 @@ export default function ApprovalsPage() {
         <p className="mt-1 text-sm text-slate-500">Review venue location, temporary CCTV days, recorded cost, vendor history, and approval remarks.</p>
       </header>
 
-      <section className="grid gap-3 sm:grid-cols-2" aria-label="Approval status overview">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Approval status overview">
         <KPICard
-          title="Approved"
-          value={approvedRecords.length.toLocaleString('en-IN')}
-          subtitle="Completed both approval levels · click to inspect"
+          title="Approved at your level"
+          value={approvedAtCurrentLevel.length.toLocaleString('en-IN')}
+          subtitle={`${currentApprovalStages.map(stage => stageTitle[stage]).join(' / ') || 'No approval stage assigned'} · click to inspect`}
           icon={<CheckCircle2 size={20} />}
           color="green"
-          onClick={() => setApprovalDrilldown('approved')}
+          onClick={() => {
+            setApprovalDrilldown('approved');
+            setApprovalDrilldownClient('');
+            setApprovalDrilldownExam('');
+          }}
         />
         <KPICard
           title="Waiting for approval"
@@ -468,7 +525,23 @@ export default function ApprovalsPage() {
           subtitle={`${waitingByStage.surveillance_head} with Surveillance Head · ${waitingByStage.enablement_head} with Head of Enablement · click to inspect`}
           icon={<Clock3 size={20} />}
           color="orange"
-          onClick={() => setApprovalDrilldown('pending')}
+          onClick={() => {
+            setApprovalDrilldown('pending');
+            setApprovalDrilldownClient('');
+            setApprovalDrilldownExam('');
+          }}
+        />
+        <KPICard
+          title="Returned to zone"
+          value={returnedRecords.length.toLocaleString('en-IN')}
+          subtitle="Awaiting zonal user update · click to inspect sender and venue"
+          icon={<CornerUpLeft size={20} />}
+          color="red"
+          onClick={() => {
+            setApprovalDrilldown('returned');
+            setApprovalDrilldownClient('');
+            setApprovalDrilldownExam('');
+          }}
         />
       </section>
 
@@ -482,7 +555,7 @@ export default function ApprovalsPage() {
         </div>
       ) : (
         <>
-          <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-3">
+          <section className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 xl:grid-cols-4">
             <Select label="Client Name" value={clientFilter} onChange={event => {
               setClientFilter(event.target.value);
               setExamFilter('');
@@ -496,6 +569,12 @@ export default function ApprovalsPage() {
               setSelectedIds([]);
               setPage(1);
             }} options={examOptions.map(exam => ({ value: exam, label: exam }))} placeholder="Select exam" disabled={!clientFilter} />
+            <Select label="Zone" value={zoneFilter} onChange={event => {
+              setZoneFilter(event.target.value);
+              setSelectedId('');
+              setSelectedIds([]);
+              setPage(1);
+            }} options={zoneOptions.map(zone => ({ value: zone, label: zone }))} placeholder="All zones" />
             <Input label="TC Code" value={tcCodeFilter} onChange={event => {
               setTcCodeFilter(event.target.value.replace(/\D/g, ''));
               setSelectedId('');
@@ -526,7 +605,7 @@ export default function ApprovalsPage() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] table-fixed text-left text-sm">
+              <table className="w-full min-w-[1480px] table-fixed text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
                   <tr>
                     <th className="w-12 px-3 py-3">
@@ -538,12 +617,14 @@ export default function ApprovalsPage() {
                           : [])}
                         className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                     </th>
-                    <th className="w-[22%] whitespace-normal px-3 py-3">TC venue</th>
+                    <th className="w-[18%] whitespace-normal px-3 py-3">TC code &amp; TC name</th>
+                    <th className="w-[13%] whitespace-normal px-3 py-3">Vendor</th>
+                    <th className="w-[17%] whitespace-normal px-3 py-3">Zone · state · city · project</th>
                     <th className="w-[13%] whitespace-normal px-3 py-3">Approval quote &amp; use</th>
-                    <th className="w-[12%] whitespace-normal px-3 py-3">Cost history</th>
-                    <th className="w-[10%] whitespace-normal px-3 py-3">Cost review</th>
-                    <th className="w-[23%] whitespace-normal px-3 py-3">Approver remarks</th>
-                    <th className="w-[13%] whitespace-normal px-3 py-3">Decision</th>
+                    <th className="w-[11%] whitespace-normal px-3 py-3">Cost history</th>
+                    <th className="w-[9%] whitespace-normal px-3 py-3">Cost review</th>
+                    <th className="w-[22%] whitespace-normal px-3 py-3">Approver remarks</th>
+                    <th className="w-[12%] whitespace-normal px-3 py-3">Decision</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -583,19 +664,26 @@ export default function ApprovalsPage() {
                             setSelectedId(record.id);
                             setAlert(null);
                           }} className="font-mono text-xs font-bold text-blue-700 hover:underline">
-                            TC {requirement.tcCode}
+                            <span className="text-slate-500">TC Code </span>{requirement.tcCode}
                           </button>
-                          <p className="mt-1 break-words font-semibold leading-snug text-slate-900">{requirement.tcName}</p>
-                          <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                            {requirement.zone} · {requirement.state} · {requirement.city}
+                          <p className="mt-1 break-words text-xs font-semibold leading-snug text-slate-900">
+                            <span className="text-slate-500">TC Name: </span>{requirement.tcName}
                           </p>
-                          <p className="text-xs leading-relaxed text-slate-500">
-                            {requirement.clientName} · {requirement.examName}
-                          </p>
-                          <p className="mt-1 text-xs font-medium text-slate-700">{vendorName}</p>
                           <span className="mt-2 inline-flex rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
                             {stageTitle[record.approvalStage || 'surveillance_head']}
                           </span>
+                        </td>
+                        <td className="whitespace-normal break-words px-3 py-4">
+                          <span className="text-xs text-slate-500">Vendor name</span>
+                          <p className="mt-1 font-medium leading-snug text-slate-800">{vendorName}</p>
+                        </td>
+                        <td className="whitespace-normal px-3 py-4">
+                          <p className="text-xs leading-relaxed text-slate-700">
+                            {requirement.zone} · {requirement.state} · {requirement.city}
+                          </p>
+                          <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                            {requirement.clientName} · {requirement.examName}
+                          </p>
                         </td>
                         <td className="whitespace-normal px-3 py-4">
                           <p className="font-semibold tabular-nums text-slate-900">{money(record.localVendorCost)}</p>
@@ -671,7 +759,7 @@ export default function ApprovalsPage() {
                     );
                   })}
                   {pageQueue.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">No TC venues match the selected client, exam, or code.</td></tr>
+                    <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">No TC venues match the selected client, exam, zone, or code.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -789,7 +877,8 @@ export default function ApprovalsPage() {
 
       <Modal open={Boolean(detailRecordId && detailsRecord && detailsRequirement)}
         onClose={() => setDetailRecordId('')}
-        title={`Venue cost history · TC Code ${detailsRequirement?.tcCode || ''}`}>
+        title={`Venue cost history · TC Code ${detailsRequirement?.tcCode || ''}`}
+        size="2xl">
         {detailsRecord && detailsRequirement && (() => {
           const records = data.installations.flatMap(record => {
             const requirement = data.requirements.find(item => item.id === record.requirementId);
@@ -828,7 +917,7 @@ export default function ApprovalsPage() {
             };
           });
           return (
-            <div className="max-h-[75vh] space-y-5 overflow-y-auto pr-1">
+            <div className="max-h-[78vh] space-y-5 overflow-y-auto pr-1">
               <div className="grid gap-3 sm:grid-cols-3">
                 <Summary label="Temporary CCTV days" value={new Set(schedule.map(item => normalizeExamDate(item.examDate) || item.examDate)).size.toLocaleString('en-IN')} />
                 <Summary label="Total recorded cost till now" value={money(totalCost)} />
@@ -961,61 +1050,155 @@ export default function ApprovalsPage() {
       <Modal
         open={Boolean(approvalDrilldown)}
         onClose={() => setApprovalDrilldown(null)}
-        title={approvalDrilldown === 'approved' ? 'Approved venues' : 'Venues waiting for approval'}
+        title={approvalDrilldown === 'approved'
+          ? 'Approvals completed at your level'
+          : approvalDrilldown === 'returned'
+            ? 'Returned to zone · awaiting update'
+            : 'Waiting for approval'}
         size="xl"
       >
-        <div className="max-h-[70vh] space-y-3 overflow-y-auto">
-          <p className="text-sm text-slate-600">
-            {approvalDrilldown === 'approved'
-              ? 'Approval history for venues that have completed both levels.'
-              : 'Each pending venue shows the approval stage and role currently responsible for review.'}
-          </p>
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                <tr>
-                  {['TC venue', 'Client · exam', 'Zone', approvalDrilldown === 'approved' ? 'Last approved by' : 'Waiting with', 'Current quote'].map(label => (
-                    <th key={label} className="whitespace-normal px-3 py-3">{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {approvalDrilldownRecords.map(record => {
-                  const requirement = indexes.requirementsById.get(record.requirementId);
-                  if (!requirement) return null;
-                  const events = indexes.approvalEventsByRecord.get(record.id) || [];
-                  const lastApprovedEvent = [...events].reverse().find(event => event.action === 'approved');
-                  const approverName = lastApprovedEvent
-                    ? data.users.find(user => user.id === lastApprovedEvent.userId)?.name || 'Former user'
-                    : 'Approval history unavailable';
-                  const waitingStage = record.approvalStage || 'surveillance_head';
-                  return (
-                    <tr key={record.id} className="border-t border-slate-100 align-top">
-                      <td className="px-3 py-3">
-                        <p className="font-mono text-xs font-semibold text-blue-700">TC {requirement.tcCode}</p>
-                        <p className="mt-1 whitespace-normal font-medium text-slate-900">{requirement.tcName}</p>
-                        <p className="mt-1 text-xs text-slate-500">{requirement.city}, {requirement.state}</p>
-                      </td>
-                      <td className="whitespace-normal px-3 py-3">{requirement.clientName} · {requirement.examName}</td>
-                      <td className="px-3 py-3">{requirement.zone}</td>
-                      <td className="whitespace-normal px-3 py-3">
-                        {approvalDrilldown === 'approved'
-                          ? approverName
-                          : <span className="font-medium text-amber-800">{stageTitle[waitingStage]}</span>}
-                        {approvalDrilldown === 'approved' && lastApprovedEvent && (
-                          <p className="mt-1 text-xs text-slate-500">{stageTitle[lastApprovedEvent.stage]}</p>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3 font-medium">{money(record.localVendorCost)}</td>
-                    </tr>
-                  );
-                })}
-                {approvalDrilldownRecords.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">No venues in this approval status.</td></tr>
-                )}
-              </tbody>
-            </table>
+        <div className="max-h-[78vh] space-y-4 overflow-y-auto">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white pb-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">
+                {approvalDrilldown === 'approved'
+                  ? currentApprovalStages.map(stage => stageTitle[stage]).join(' / ')
+                  : approvalDrilldown === 'returned'
+                    ? 'Update required from zonal user'
+                    : 'Approval owner is shown at each step'}
+              </p>
+              <p className="text-xs text-slate-500">
+                {approvalDrilldownClient
+                  ? `${approvalDrilldownClient}${approvalDrilldownExam ? ` · ${approvalDrilldownExam}` : ''}`
+                  : 'Choose a client, then an exam, to view venue details.'}
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => {
+              if (approvalDrilldownExam) {
+                setApprovalDrilldownExam('');
+              } else if (approvalDrilldownClient) {
+                setApprovalDrilldownClient('');
+              } else {
+                setApprovalDrilldown(null);
+              }
+            }}>
+              <ArrowLeft size={14} />
+              {approvalDrilldownExam ? 'Back to exams' : approvalDrilldownClient ? 'Back to clients' : 'Back to approvals'}
+            </Button>
           </div>
+
+          {!approvalDrilldownClient ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {drilldownClientGroups.map(group => (
+                <button key={group.clientName} type="button"
+                  onClick={() => setApprovalDrilldownClient(group.clientName)}
+                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40">
+                  <span className="font-semibold text-slate-900">{group.clientName}</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                    {group.count} venue{group.count === 1 ? '' : 's'}
+                  </span>
+                </button>
+              ))}
+              {drilldownClientGroups.length === 0 && (
+                <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                  No venues in this approval status.
+                </p>
+              )}
+            </div>
+          ) : !approvalDrilldownExam ? (
+            <div className="space-y-2">
+              {drilldownExamGroups.map(group => (
+                <button key={group.examName} type="button"
+                  onClick={() => setApprovalDrilldownExam(group.examName)}
+                  className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-blue-300 hover:bg-blue-50/40">
+                  <span className="font-medium text-slate-900">{group.examName}</span>
+                  <span className="text-xs text-slate-600">{group.count} venue{group.count === 1 ? '' : 's'}</span>
+                </button>
+              ))}
+              {drilldownExamGroups.length === 0 && (
+                <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                  No exams in this client for the selected approval status.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[980px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                  <tr>
+                    {[
+                      'TC code & name',
+                      'Zone · state · city',
+                      'Vendor',
+                      approvalDrilldown === 'approved'
+                        ? 'Your approval status'
+                        : approvalDrilldown === 'returned'
+                          ? 'Sent back by · awaiting'
+                          : 'Pending with',
+                      'Quote',
+                      ...(approvalDrilldown === 'returned' ? ['Send-back remarks'] : []),
+                    ].map(label => <th key={label} className="whitespace-normal px-3 py-3">{label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {scopedDrilldownRecords.map(record => {
+                    const requirement = indexes.requirementsById.get(record.requirementId);
+                    if (!requirement) return null;
+                    const lastEvent = getLastStageEvent(record);
+                    const lastSender = lastEvent
+                      ? data.users.find(user => user.id === lastEvent.userId)?.name || 'Former user'
+                      : 'Approval history unavailable';
+                    const approvedStageEvents = currentApprovalStages
+                      .map(stage => getLastStageEvent(record, stage))
+                      .filter(event => event?.action === 'approved');
+                    return (
+                      <tr key={record.id} className="border-t border-slate-100 align-top">
+                        <td className="px-3 py-3">
+                          <p className="font-mono text-xs font-semibold text-blue-700">TC {requirement.tcCode}</p>
+                          <p className="mt-1 whitespace-normal font-medium text-slate-900">{requirement.tcName}</p>
+                        </td>
+                        <td className="whitespace-normal px-3 py-3">
+                          {requirement.zone}<br />{requirement.state} · {requirement.city}
+                        </td>
+                        <td className="whitespace-normal px-3 py-3">
+                          {indexes.vendorsById.get(record.vendorId)?.vendorName || 'Vendor unavailable'}
+                        </td>
+                        <td className="whitespace-normal px-3 py-3">
+                          {approvalDrilldown === 'approved' ? (
+                            approvedStageEvents.map(event => (
+                              <p key={event!.id} className="mb-1 text-emerald-800">
+                                {stageTitle[event!.stage]} · {data.users.find(user => user.id === event!.userId)?.name || 'Former user'}
+                                <span className="block text-xs text-slate-500">{dateLabel(event!.createdAt)}</span>
+                              </p>
+                            ))
+                          ) : approvalDrilldown === 'returned' ? (
+                            <>
+                              <p className="font-medium text-amber-800">Sent back by {lastSender}</p>
+                              <p className="mt-1 text-xs text-slate-600">Awaiting zone {requirement.zone} update</p>
+                              {lastEvent && <p className="mt-1 text-xs text-slate-500">{dateLabel(lastEvent.createdAt)}</p>}
+                            </>
+                          ) : (
+                            <>
+                              <p className="font-medium text-amber-800">{stageTitle[record.approvalStage || 'surveillance_head']}</p>
+                              <p className="mt-1 text-xs text-slate-500">Pending with this approval role</p>
+                            </>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 font-medium">{money(record.localVendorCost)}</td>
+                        {approvalDrilldown === 'returned' && (
+                          <td className="max-w-xs whitespace-normal px-3 py-3 text-slate-600">{lastEvent?.remarks || 'No send-back remarks recorded'}</td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                  {scopedDrilldownRecords.length === 0 && (
+                    <tr><td colSpan={approvalDrilldown === 'returned' ? 6 : 5}
+                      className="px-4 py-8 text-center text-sm text-slate-500">No venue details for this client and exam.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </Modal>
     </div>

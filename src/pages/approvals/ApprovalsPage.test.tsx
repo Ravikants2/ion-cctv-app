@@ -68,9 +68,9 @@ describe('ApprovalsPage', () => {
     mockAuthData(mockData);
   });
 
-  function mockAuthData(data: AppData) {
+  function mockAuthData(data: AppData, role = initialData.users[0].role) {
     vi.mocked(useAuth).mockReturnValue({
-      currentUser: initialData.users[0],
+      currentUser: { ...initialData.users[0], role },
       data,
       syncStatus: 'idle',
       syncError: '',
@@ -185,7 +185,7 @@ describe('ApprovalsPage', () => {
 
     render(<ApprovalsPage />);
 
-    const venueCell = screen.getByText('TC TC-100').closest('td');
+    const venueCell = screen.getAllByRole('button', { name: /TC Code TC-100/ })[0].closest('td');
     expect(venueCell?.textContent?.indexOf('TC-100')).toBeLessThan(venueCell?.textContent?.indexOf('Test Venue') || 0);
     expect(screen.getByText('30/08/2026')).toBeInTheDocument();
     expect(screen.queryByText(/46264/)).not.toBeInTheDocument();
@@ -322,13 +322,122 @@ describe('ApprovalsPage', () => {
     mockData = {
       ...initialData,
       installations: [...initialData.installations, approvedInstallation],
+      approvalEvents: [
+        {
+          id: 'surveillance-approved-event',
+          installationRecordId: approvedInstallation.id,
+          stage: 'surveillance_head',
+          action: 'approved',
+          userId: initialData.users[0].id,
+          remarks: '',
+          quoteRevisionId: 'revision-2',
+          createdAt: '2026-01-02',
+        },
+        {
+          id: 'enablement-approved-event',
+          installationRecordId: approvedInstallation.id,
+          stage: 'enablement_head',
+          action: 'approved',
+          userId: initialData.users[0].id,
+          remarks: '',
+          quoteRevisionId: 'revision-2',
+          createdAt: '2026-01-03',
+        },
+      ],
+    };
+    mockAuthData(mockData);
+    render(<ApprovalsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Waiting for approval' }));
+    const waitingDialog = within(screen.getByRole('dialog'));
+    fireEvent.click(waitingDialog.getByRole('button', { name: /Client/ }));
+    fireEvent.click(waitingDialog.getByRole('button', { name: /Exam/ }));
+    expect(waitingDialog.getAllByText('Surveillance Head').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: /Close/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Approved at your level' }));
+    const approvedDialog = within(screen.getByRole('dialog'));
+    fireEvent.click(approvedDialog.getByRole('button', { name: /Client/ }));
+    fireEvent.click(approvedDialog.getByRole('button', { name: /Exam/ }));
+    expect(approvedDialog.getByText(/Surveillance Head · Surveillance Reviewer/)).toBeInTheDocument();
+    expect(approvedDialog.queryByText('Head of Enablement')).not.toBeInTheDocument();
+  });
+
+  it('filters the approval queue by zone', () => {
+    const secondRequirement = { ...initialData.requirements[0], id: 'requirement-2', zone: 'West 1', tcCode: 'TC-200' };
+    const secondRecord = { ...initialData.installations[0], id: 'installation-2', requirementId: secondRequirement.id };
+    mockData = {
+      ...initialData,
+      requirements: [...initialData.requirements, secondRequirement],
+      installations: [...initialData.installations, secondRecord],
+    };
+    mockAuthData(mockData);
+    render(<ApprovalsPage />);
+
+    fireEvent.change(screen.getByLabelText('Zone'), { target: { value: 'West 1' } });
+    expect(screen.getByRole('button', { name: /TC Code TC-200/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /TC Code TC-100/ })).not.toBeInTheDocument();
+  });
+
+  it('shows approvals for the logged-in Head of Enablement level', () => {
+    const approvedInstallation = {
+      ...initialData.installations[0],
+      id: 'approved-installation',
+      approvalStatus: 'approved' as const,
+      approvalStage: undefined,
+    };
+    mockData = {
+      ...initialData,
+      installations: [approvedInstallation],
+      approvalEvents: [
+        {
+          id: 'surveillance-approved-event',
+          installationRecordId: approvedInstallation.id,
+          stage: 'surveillance_head',
+          action: 'approved',
+          userId: initialData.users[0].id,
+          remarks: '',
+          quoteRevisionId: 'revision-2',
+          createdAt: '2026-01-02',
+        },
+        {
+          id: 'enablement-approved-event',
+          installationRecordId: approvedInstallation.id,
+          stage: 'enablement_head',
+          action: 'approved',
+          userId: initialData.users[0].id,
+          remarks: '',
+          quoteRevisionId: 'revision-2',
+          createdAt: '2026-01-03',
+        },
+      ],
+    };
+    mockAuthData(mockData, 'enablement_head');
+    render(<ApprovalsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Approved at your level' }));
+    const dialog = within(screen.getByRole('dialog'));
+    fireEvent.click(dialog.getByRole('button', { name: /Client/ }));
+    fireEvent.click(dialog.getByRole('button', { name: /Exam/ }));
+    expect(dialog.getByText(/Head of Enablement · Surveillance Reviewer/)).toBeInTheDocument();
+    expect(dialog.queryByText(/Surveillance Head · Surveillance Reviewer/)).not.toBeInTheDocument();
+  });
+
+  it('shows who sent back a venue and that it awaits its zone update', () => {
+    const returnedInstallation = {
+      ...initialData.installations[0],
+      approvalStatus: 'returned' as const,
+      approvalStage: 'surveillance_head' as const,
+    };
+    mockData = {
+      ...initialData,
+      installations: [returnedInstallation],
       approvalEvents: [{
-        id: 'approved-event',
-        installationRecordId: approvedInstallation.id,
-        stage: 'enablement_head',
-        action: 'approved',
+        id: 'sent-back-event',
+        installationRecordId: returnedInstallation.id,
+        stage: 'surveillance_head',
+        action: 'sent_back',
         userId: initialData.users[0].id,
-        remarks: '',
+        remarks: 'Please confirm the revised venue quotation.',
         quoteRevisionId: 'revision-2',
         createdAt: '2026-01-03',
       }],
@@ -336,11 +445,23 @@ describe('ApprovalsPage', () => {
     mockAuthData(mockData);
     render(<ApprovalsPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'View details for Waiting for approval' }));
-    expect(within(screen.getByRole('dialog')).getByText('Surveillance Head')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Close/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'View details for Approved' }));
-    expect(within(screen.getByRole('dialog')).getByText('Surveillance Reviewer')).toBeInTheDocument();
-    expect(within(screen.getByRole('dialog')).getByText('Head of Enablement')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Returned to zone' }));
+    const dialog = within(screen.getByRole('dialog'));
+    fireEvent.click(dialog.getByRole('button', { name: /Client/ }));
+    fireEvent.click(dialog.getByRole('button', { name: /Exam/ }));
+    expect(dialog.getByText(/Sent back by Surveillance Reviewer/)).toBeInTheDocument();
+    expect(dialog.getByText('Awaiting zone East 1 update')).toBeInTheDocument();
+    expect(dialog.getByText('Please confirm the revised venue quotation.')).toBeInTheDocument();
+    fireEvent.click(dialog.getByRole('button', { name: 'Back to exams' }));
+    expect(dialog.getByRole('button', { name: /Exam/ })).toBeInTheDocument();
+  });
+
+  it('opens venue cost history in the expanded modal', () => {
+    render(<ApprovalsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /View history/ }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('.max-w-6xl')).toBeInTheDocument();
+    expect(within(dialog).getByText('Exam and date-wise temporary CCTV use')).toBeInTheDocument();
   });
 });
