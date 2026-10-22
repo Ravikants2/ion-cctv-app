@@ -37,6 +37,8 @@ const appData: AppData = {
   quoteRevisions: [],
   approvalEvents: [],
   blanketApprovals: [],
+  accessRoles: [],
+  userGroups: [],
   auditLogs: [{
     id: 'audit-1', userId: 'user-1', action: 'LOGIN', entityType: 'User',
     entityId: 'user-1', timestamp: '2026-01-01',

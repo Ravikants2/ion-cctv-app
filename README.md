@@ -99,11 +99,16 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 - Two-stage quote approvals (Surveillance Head → Head of Enablement), with send-back, mandatory exception/blanket remarks, and immutable quote revision history
 - Approval comparisons for previous venue costs and quotations, vendor reuse across locations, and project-level total/per-candidate cost rankings
 - Zonal user accounts restricted to their assigned zone across Requirements, Records, and Vendors; returned quotes require a resubmission note
+- Configurable custom access roles and groups: Super Admins choose page/action permissions and zone scopes; group and role scopes are intersected, and users with no assigned zones see no venue data
+- TC Code filters on the dashboard, requirements, records, and approval queue
+- Existing installation records without approval metadata are migrated to pending Surveillance Head review; records with explicit final approval remain approved
 - Excel export + PDF/Print reports (A4 landscape)
-- Role-based access: Super Admin / Sub Admin / User / Viewer / Zonal User / Surveillance Head / Head of Enablement
+- Role-based access: Super Admin / Sub Admin / User / Viewer / Zonal User / Surveillance Head / Head of Enablement / configured custom roles
 - Backup & Restore (JSON download/upload from header menu)
 - All data synced to GitHub `data` branch
 - Gemini-powered chat over structured application records
+
+Access roles and zone restrictions are enforced in the client application. They are not server-side authorization boundaries; use a backend with server-enforced access controls before relying on them to protect sensitive data.
 
 ## Gemini data chat (demo setup)
 

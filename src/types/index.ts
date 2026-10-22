@@ -1,6 +1,6 @@
 export type ApprovalStage = 'surveillance_head' | 'enablement_head';
 export type ApprovalStatus = 'pending' | 'returned' | 'approved';
-export type Role = 'super_admin' | 'sub_admin' | 'user' | 'viewer' | 'zonal_user' | ApprovalStage;
+export type Role = 'super_admin' | 'sub_admin' | 'user' | 'viewer' | 'zonal_user' | ApprovalStage | 'custom';
 
 export const ZONES = [
   'East 1', 'East 2', 'North 1', 'North 2', 'North 3', 'North 4',
@@ -14,6 +14,29 @@ export interface User {
   role: Role;
   passwordHash: string;
   zone?: string;
+  customRoleId?: string;
+  groupIds?: string[];
+}
+
+export interface AccessRole {
+  id: string;
+  name: string;
+  permissions: string[];
+  allZones: boolean;
+  zones: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserGroup {
+  id: string;
+  name: string;
+  permissions: string[];
+  allZones: boolean;
+  zones: string[];
+  userIds: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RequirementMaster {
@@ -148,6 +171,8 @@ export interface AppData {
   quoteRevisions: QuoteRevision[];
   approvalEvents: ApprovalEvent[];
   blanketApprovals: BlanketApproval[];
+  accessRoles: AccessRole[];
+  userGroups: UserGroup[];
   auditLogs: AuditLog[];
 }
 
@@ -157,4 +182,5 @@ export interface DashboardFilters {
   client: string;
   exam: string;
   zone: string;
+  tcCode?: string;
 }

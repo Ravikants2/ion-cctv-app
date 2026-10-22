@@ -132,6 +132,12 @@ describe('applyDashboardFilters', () => {
     expect(result[0].id).toBe('i2');
   });
 
+  it('filters by TC Code', () => {
+    const result = applyDashboardFilters([inst1, inst2], [req1, req2], examDates, { ...emptyFilters, tcCode: 'TC002' });
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('i2');
+  });
+
   it('filters by date range', () => {
     const result = applyDashboardFilters([inst1, inst2], [req1, req2], examDates, { ...emptyFilters, startDate: '2024-03-02', endDate: '2024-03-02' });
     // Only inst1 has a date on 2024-03-02

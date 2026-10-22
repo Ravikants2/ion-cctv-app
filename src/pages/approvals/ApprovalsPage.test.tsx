@@ -48,6 +48,8 @@ const initialData: AppData = {
   ],
   approvalEvents: [],
   blanketApprovals: [],
+  accessRoles: [],
+  userGroups: [],
   auditLogs: [],
 };
 

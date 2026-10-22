@@ -24,6 +24,7 @@ export default function RecordsPage() {
   const [filterZone, setFilterZone] = useState('');
   const [filterState, setFilterState] = useState('');
   const [filterCity, setFilterCity] = useState('');
+  const [filterTcCode, setFilterTcCode] = useState('');
   const [page, setPage] = useState(1);
 
   const scopedRequirements = data.requirements.filter(r => currentUser?.role !== 'zonal_user' || r.zone === currentUser.zone);
@@ -39,6 +40,11 @@ export default function RecordsPage() {
   const cities = [...new Set(scopedRequirements
     .filter(r => (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState))
     .map(r => r.city))].sort();
+  const tcCodes = [...new Set(scopedRequirements
+    .filter(r => (!filterClient || r.clientName === filterClient) && (!filterExam || r.examName === filterExam) &&
+      (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState) &&
+      (!filterCity || r.city === filterCity))
+    .map(r => r.tcCode))].sort();
 
   const filtered = scopedInstallations.filter(inst => {
     const req = scopedRequirements.find(r => r.id === inst.requirementId);
@@ -48,6 +54,7 @@ export default function RecordsPage() {
     if (filterZone && req.zone !== filterZone) return false;
     if (filterState && req.state !== filterState) return false;
     if (filterCity && req.city !== filterCity) return false;
+    if (filterTcCode && req.tcCode !== filterTcCode) return false;
     if (startDate || endDate) {
       const dates = data.examDates.filter(d => d.installationRecordId === inst.id)
         .map(d => normalizeExamDate(d.examDate) || d.examDate);
@@ -74,6 +81,7 @@ export default function RecordsPage() {
     filterZone && `Zone: ${filterZone}`,
     filterState && `State: ${filterState}`,
     filterCity && `City: ${filterCity}`,
+    filterTcCode && `TC Code: ${filterTcCode}`,
     startDate && `From: ${startDate}`,
     endDate && `To: ${endDate}`,
   ].filter(Boolean).join(' | ');
@@ -96,7 +104,7 @@ export default function RecordsPage() {
           {can('create_installation') && (
             <Button size="sm" onClick={() => navigate('/installation/new')}>+ New Record</Button>
           )}
-          {can('upload_master') && (
+          {can('bulk_records') && (
             <Button variant="secondary" size="sm" onClick={() => navigate('/installation/bulk')}>Bulk Upload</Button>
           )}
         </div>
@@ -124,8 +132,10 @@ export default function RecordsPage() {
           options={states.map(state => ({ value: state, label: state }))} placeholder="All states" className="w-40" />
         <Select label="City" value={filterCity} onChange={e => { setFilterCity(e.target.value); setPage(1); }}
           options={cities.map(city => ({ value: city, label: city }))} placeholder="All cities" className="w-40" />
-        {(filterClient || filterExam || filterZone || filterState || filterCity || startDate || endDate) && (
-          <Button variant="ghost" size="sm" className="mb-0.5" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setFilterState(''); setFilterCity(''); setStartDate(''); setEndDate(''); setPage(1); }}>Clear filters</Button>
+        <Select label="TC Code" value={filterTcCode} onChange={e => { setFilterTcCode(e.target.value); setPage(1); }}
+          options={tcCodes.map(code => ({ value: code, label: code }))} placeholder="All TC Codes" className="w-40" />
+        {(filterClient || filterExam || filterZone || filterState || filterCity || filterTcCode || startDate || endDate) && (
+          <Button variant="ghost" size="sm" className="mb-0.5" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setFilterState(''); setFilterCity(''); setFilterTcCode(''); setStartDate(''); setEndDate(''); setPage(1); }}>Clear filters</Button>
         )}
         </div>
       </div>
@@ -162,11 +172,9 @@ export default function RecordsPage() {
                   <td className="px-3 py-3">
                     {inst.approvalStatus === 'returned'
                       ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">Changes requested</span>
-                      : inst.approvalStatus === 'pending'
-                        ? <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">Awaiting approval</span>
-                        : inst.approvalStatus === 'approved'
+                      : inst.approvalStatus === 'approved'
                           ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">Approved</span>
-                          : <span className="text-xs text-slate-500">Legacy record</span>}
+                          : <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">Awaiting approval</span>}
                   </td>
                   <td className="px-3 py-3">
                     {inst.quotationFileId ? (
@@ -177,7 +185,8 @@ export default function RecordsPage() {
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-1">
-                      {can('edit_installation') && (currentUser?.role !== 'zonal_user' || inst.approvalStatus === 'returned') && (
+                      {can('edit_installation') &&
+                        ((currentUser?.role !== 'zonal_user' && currentUser?.role !== 'custom') || inst.approvalStatus === 'returned') && (
                         <Button variant="ghost" size="sm" onClick={() => navigate(`/installation/edit/${inst.id}`)}>
                           <Pencil size={12} />
                         </Button>

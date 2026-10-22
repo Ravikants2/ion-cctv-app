@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { User, Role, AppData, AuditAction } from '../types';
+import type { User, AppData, AuditAction } from '../types';
 import { loadData, saveData, verifyPassword, getInitialData, isGitHubConfigured } from '../utils/storage';
+import { BUILT_IN_ROLE_PERMISSIONS, userAssignedZones } from '../utils/permissions';
 
 export type SyncStatus = 'idle' | 'loading' | 'saving' | 'saved' | 'error';
 
@@ -27,6 +28,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [syncError, setSyncError] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const signedInUser = currentUser ? data.users.find(user => user.id === currentUser.id) || currentUser : null;
+  const assignedGroups = useMemo(() => signedInUser && signedInUser.role !== 'super_admin'
+    ? data.userGroups.filter(group => (signedInUser.groupIds || []).includes(group.id) || group.userIds.includes(signedInUser.id))
+    : [], [signedInUser, data.userGroups]);
+  const customRole = signedInUser?.customRoleId
+    ? data.accessRoles.find(role => role.id === signedInUser.customRoleId)
+    : undefined;
+  const rolePolicy = useMemo(() => signedInUser?.role === 'custom'
+    ? customRole
+    : signedInUser
+      ? {
+          allZones: signedInUser.role !== 'zonal_user',
+          zones: signedInUser.role === 'zonal_user' && signedInUser.zone ? [signedInUser.zone] : [],
+          permissions: BUILT_IN_ROLE_PERMISSIONS[signedInUser.role] || [],
+        }
+      : undefined, [signedInUser, customRole]);
+  const zonePolicy = useMemo(() => rolePolicy
+    ? userAssignedZones(rolePolicy, assignedGroups)
+    : { allZones: false, zones: [] as string[] }, [rolePolicy, assignedGroups]);
+  const visibleData = useMemo(() => {
+    if (!signedInUser || zonePolicy.allZones) return data;
+    const requirements = data.requirements.filter(requirement => zonePolicy.zones.includes(requirement.zone));
+    const requirementIds = new Set(requirements.map(requirement => requirement.id));
+    const installations = data.installations.filter(record => requirementIds.has(record.requirementId));
+    const installationIds = new Set(installations.map(record => record.id));
+    return {
+      ...data,
+      requirements,
+      vendors: data.vendors.filter(vendor => zonePolicy.zones.includes(vendor.zone)),
+      installations,
+      examDates: data.examDates.filter(date => installationIds.has(date.installationRecordId)),
+      quotations: data.quotations.filter(quotation => installationIds.has(quotation.installationRecordId)),
+      quoteRevisions: data.quoteRevisions.filter(revision => installationIds.has(revision.installationRecordId)),
+      approvalEvents: data.approvalEvents.filter(event => installationIds.has(event.installationRecordId)),
+      blanketApprovals: data.blanketApprovals.map(approval => ({
+        ...approval,
+        installationRecordIds: approval.installationRecordIds.filter(id => installationIds.has(id)),
+      })).filter(approval => approval.installationRecordIds.length > 0),
+    };
+  }, [data, signedInUser, zonePolicy]);
 
   // Load data on mount
   useEffect(() => {
@@ -112,26 +153,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const can = useCallback((action: string): boolean => {
-    if (!currentUser) return false;
-    const role: Role = currentUser.role;
-    const isAdmin = role === 'super_admin' || role === 'sub_admin';
-    switch (action) {
-      case 'delete_master':      return role === 'super_admin';
-      case 'upload_master':      return role === 'super_admin' || role === 'sub_admin';
-      case 'create_installation':return !['viewer', 'surveillance_head', 'enablement_head'].includes(role);
-      case 'edit_installation':  return !['viewer', 'surveillance_head', 'enablement_head'].includes(role);
-      case 'view_dashboard':     return true;
-      case 'manage_users':       return role === 'super_admin';
-      case 'view_approvals':     return isAdmin || role === 'surveillance_head' || role === 'enablement_head';
-      case 'approve_surveillance': return isAdmin || role === 'surveillance_head';
-      case 'approve_enablement':   return isAdmin || role === 'enablement_head';
-      default: return false;
-    }
-  }, [currentUser]);
+    if (!signedInUser) return false;
+    const isSuperAdmin = signedInUser.role === 'super_admin';
+    if (action === 'manage_users' || action === 'manage_access') return isSuperAdmin;
+
+    const rolePermissions = signedInUser.role === 'custom'
+      ? customRole?.permissions || []
+      : BUILT_IN_ROLE_PERMISSIONS[signedInUser.role] || [];
+    const permissionForAction: Record<string, string[]> = {
+      create_installation: ['records:create'],
+      edit_installation: ['records:edit'],
+      upload_requirements: ['requirements:import'],
+      delete_requirements: ['requirements:delete'],
+      manage_requirements: ['requirements:manage'],
+      upload_vendors: ['vendors:import'],
+      delete_vendors: ['vendors:delete'],
+      manage_vendors: ['vendors:manage'],
+      bulk_records: ['records:bulk'],
+      view_approvals: ['page:approvals'],
+      approve_surveillance: ['approvals:surveillance'],
+      approve_enablement: ['approvals:enablement'],
+      view_dashboard: ['page:dashboard.executive', 'page:dashboard.financial', 'page:dashboard.operations', 'page:dashboard.vendor', 'page:dashboard.venue'],
+      export_data: ['workspace:backup'],
+    };
+    const requested = permissionForAction[action] || [action];
+    const hasRolePermission = requested.some(permission => rolePermissions.includes(permission));
+    if (!hasRolePermission) return false;
+    if (assignedGroups.length > 0 && !requested.some(permission =>
+      assignedGroups.every(group => group.permissions.includes(permission))
+    )) return false;
+    return true;
+  }, [signedInUser, customRole, assignedGroups]);
 
   return (
     <AuthContext.Provider value={{
-      currentUser, data, syncStatus, syncError,
+      currentUser: signedInUser, data: visibleData, syncStatus, syncError,
       isGitHub: isGitHubConfigured(),
       login, logout, updateData, addAuditLog, can, reloadFromGitHub,
     }}>

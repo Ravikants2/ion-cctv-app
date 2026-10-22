@@ -21,6 +21,8 @@ const data: AppData = {
   quoteRevisions: [],
   approvalEvents: [],
   blanketApprovals: [],
+  accessRoles: [],
+  userGroups: [],
   auditLogs: [],
 };
 

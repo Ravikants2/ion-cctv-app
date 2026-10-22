@@ -13,6 +13,13 @@ export function GlobalFilters() {
       .map(r => r.examName)
   )].sort();
   const zones = [...new Set(data.requirements.map(r => r.zone))].sort();
+  const tcCodes = [...new Set(data.requirements
+    .filter(requirement =>
+      (!filters.client || requirement.clientName === filters.client) &&
+      (!filters.exam || requirement.examName === filters.exam) &&
+      (!filters.zone || requirement.zone === filters.zone)
+    )
+    .map(requirement => requirement.tcCode))].sort();
 
   return (
     <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -63,6 +70,14 @@ export function GlobalFilters() {
           options={zones.map(z => ({ value: z, label: z }))}
           placeholder="All Zones"
           className="w-36"
+        />
+        <Select
+          label="TC Code"
+          value={filters.tcCode || ''}
+          onChange={e => setFilters({ ...filters, tcCode: e.target.value })}
+          options={tcCodes.map(code => ({ value: code, label: code }))}
+          placeholder="All TC Codes"
+          className="w-40"
         />
       </div>
     </div>

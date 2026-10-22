@@ -46,24 +46,43 @@ export function getInitialData(): AppData {
     quoteRevisions: [],
     approvalEvents: [],
     blanketApprovals: [],
+    accessRoles: [],
+    userGroups: [],
     auditLogs: [],
   };
 }
 
 export function normalizeAppData(data: Partial<AppData>): AppData {
   const initial = getInitialData();
+  const userGroups = Array.isArray(data.userGroups) ? data.userGroups : [];
+  const users = Array.isArray(data.users) && data.users.length > 0
+    ? data.users.map(user => ({
+        ...user,
+        groupIds: [...new Set([
+          ...(Array.isArray(user.groupIds) ? user.groupIds : []),
+          ...userGroups.filter(group => group.userIds.includes(user.id)).map(group => group.id),
+        ])],
+      }))
+    : initial.users;
+  const installations = (Array.isArray(data.installations) ? data.installations : []).map(record => ({
+    ...record,
+    approvalStatus: record.approvalStatus || 'pending' as const,
+    approvalStage: record.approvalStage || (record.approvalStatus === 'approved' ? undefined : 'surveillance_head' as const),
+  }));
   return {
     ...initial,
     ...data,
-    users: Array.isArray(data.users) && data.users.length > 0 ? data.users : initial.users,
+    users,
     requirements: Array.isArray(data.requirements) ? data.requirements : [],
     vendors: Array.isArray(data.vendors) ? data.vendors : [],
-    installations: Array.isArray(data.installations) ? data.installations : [],
+    installations,
     examDates: Array.isArray(data.examDates) ? data.examDates : [],
     quotations: Array.isArray(data.quotations) ? data.quotations : [],
     quoteRevisions: Array.isArray(data.quoteRevisions) ? data.quoteRevisions : [],
     approvalEvents: Array.isArray(data.approvalEvents) ? data.approvalEvents : [],
     blanketApprovals: Array.isArray(data.blanketApprovals) ? data.blanketApprovals : [],
+    accessRoles: Array.isArray(data.accessRoles) ? data.accessRoles : [],
+    userGroups,
     auditLogs: Array.isArray(data.auditLogs) ? data.auditLogs : [],
   };
 }

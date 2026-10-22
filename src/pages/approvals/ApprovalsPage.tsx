@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Alert, Modal } from '../../components/ui/index';
 import { Button } from '../../components/ui/Button';
-import { Textarea } from '../../components/ui/FormFields';
+import { Input, Textarea } from '../../components/ui/FormFields';
 import { useAuth } from '../../context/AuthContext';
 import type {
   ApprovalEvent,
@@ -24,10 +24,6 @@ const dateLabel = (date: string) => {
   const value = new Date(date);
   return Number.isNaN(value.getTime()) ? date : value.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
-
-function isAdminRole(role: string) {
-  return role === 'super_admin' || role === 'sub_admin';
-}
 
 function getLatestRevision(revisions: QuoteRevision[], recordId: string) {
   const sorted = revisions
@@ -51,21 +47,27 @@ function getRevisionHistory(revisions: QuoteRevision[], recordId: string) {
 export default function ApprovalsPage() {
   const { data, updateData, addAuditLog, currentUser, can } = useAuth();
   const [selectedId, setSelectedId] = useState('');
+  const [tcCodeFilter, setTcCodeFilter] = useState('');
   const [remarks, setRemarks] = useState('');
   const [exceptionApproval, setExceptionApproval] = useState(false);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [blanketModalOpen, setBlanketModalOpen] = useState(false);
   const [blanketRemarks, setBlanketRemarks] = useState('');
 
-  const allowedStages: ApprovalStage[] = isAdminRole(currentUser?.role || '')
-    ? ['surveillance_head', 'enablement_head']
-    : currentUser?.role === 'surveillance_head' || currentUser?.role === 'enablement_head'
-      ? [currentUser.role]
-      : [];
+  const allowedStages: ApprovalStage[] = [
+    ...(can('approve_surveillance') ? ['surveillance_head' as const] : []),
+    ...(can('approve_enablement') ? ['enablement_head' as const] : []),
+  ];
   const queue = data.installations
-    .filter(record => record.approvalStatus === 'pending' && record.approvalStage && allowedStages.includes(record.approvalStage))
+    .filter(record => (record.approvalStatus || 'pending') === 'pending' &&
+      allowedStages.includes(record.approvalStage || 'surveillance_head'))
+    .map(record => record.approvalStage ? record : { ...record, approvalStage: 'surveillance_head' as const })
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-  const selectedRecord = queue.find(record => record.id === selectedId) || queue[0];
+  const filteredQueue = queue.filter(record => {
+    const requirement = data.requirements.find(item => item.id === record.requirementId);
+    return !tcCodeFilter || requirement?.tcCode.toLowerCase().includes(tcCodeFilter.trim().toLowerCase());
+  });
+  const selectedRecord = filteredQueue.find(record => record.id === selectedId) || filteredQueue[0];
   const selectedRequirement = selectedRecord
     ? data.requirements.find(requirement => requirement.id === selectedRecord.requirementId)
     : undefined;
@@ -194,7 +196,7 @@ export default function ApprovalsPage() {
       ? `Per-candidate cost is more than 25% above the other venues in this exam project (${money(averageProjectPerCandidate)} average).`
       : undefined,
   ].filter((flag): flag is string => Boolean(flag));
-  const currentStage = selectedRecord?.approvalStage;
+  const currentStage = selectedRecord?.approvalStage || (selectedRecord?.approvalStatus !== 'approved' ? 'surveillance_head' : undefined);
   const isAllowedToAct = !!currentStage && (
     (currentStage === 'surveillance_head' && can('approve_surveillance')) ||
     (currentStage === 'enablement_head' && can('approve_enablement'))
@@ -362,7 +364,7 @@ export default function ApprovalsPage() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {[
           ['Awaiting your review', queue.length, 'bg-blue-50 text-blue-700'],
-          ['Surveillance Head', data.installations.filter(item => item.approvalStatus === 'pending' && item.approvalStage === 'surveillance_head').length, 'bg-indigo-50 text-indigo-700'],
+          ['Surveillance Head', data.installations.filter(item => (item.approvalStatus || 'pending') === 'pending' && (item.approvalStage || 'surveillance_head') === 'surveillance_head').length, 'bg-indigo-50 text-indigo-700'],
           ['Head of Enablement', data.installations.filter(item => item.approvalStatus === 'pending' && item.approvalStage === 'enablement_head').length, 'bg-violet-50 text-violet-700'],
           ['Sent back to zone', returnedCount, 'bg-amber-50 text-amber-800'],
           ['Fully approved', approvedCount, 'bg-emerald-50 text-emerald-700'],
@@ -386,9 +388,11 @@ export default function ApprovalsPage() {
             <div className="border-b border-slate-100 px-4 py-3">
               <h2 className="font-semibold text-slate-800">Review queue</h2>
               <p className="text-xs text-slate-500">{queue.length} quote{queue.length === 1 ? '' : 's'} at your level</p>
+              <Input label="Filter by TC Code" value={tcCodeFilter} onChange={event => setTcCodeFilter(event.target.value)}
+                placeholder="Enter TC Code" className="mt-2" />
             </div>
             <div className="max-h-[680px] overflow-y-auto">
-              {queue.map(record => {
+              {filteredQueue.map(record => {
                 const requirement = data.requirements.find(item => item.id === record.requirementId);
                 const recordVendor = data.vendors.find(item => item.id === record.vendorId);
                 const count = getCandidateCount(record, data.quoteRevisions, data.examDates);
@@ -405,7 +409,7 @@ export default function ApprovalsPage() {
                     </div>
                     <div className="mt-3 flex items-center justify-between gap-2 text-xs">
                       <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
-                        {record.approvalStage ? stageTitle[record.approvalStage] : 'Review'}
+                        {stageTitle[record.approvalStage || 'surveillance_head']}
                       </span>
                       <span className="font-semibold text-slate-800">{money(record.localVendorCost)}</span>
                     </div>

@@ -7,7 +7,7 @@ interface FilterContextType {
   clearFilters: () => void;
 }
 
-const empty: DashboardFilters = { startDate: '', endDate: '', client: '', exam: '', zone: '' };
+const empty: DashboardFilters = { startDate: '', endDate: '', client: '', exam: '', zone: '', tcCode: '' };
 
 const FilterContext = createContext<FilterContextType | null>(null);
 

@@ -12,17 +12,17 @@ import {
 } from 'lucide-react';
 
 const navItems = [
-  { to: '/dashboard/executive',  label: 'Dashboard',         icon: LayoutDashboard, viewerVisible: true },
-  { to: '/dashboard/financial',  label: 'Finance',            icon: TrendingUp,      viewerVisible: true },
-  { to: '/dashboard/operations', label: 'Operations',         icon: Wrench,          viewerVisible: true },
-  { to: '/dashboard/vendor',     label: 'Vendor Dashboard',   icon: Users,           viewerVisible: false },
-  { to: '/dashboard/venue',      label: 'Venue Dashboard',    icon: LayoutDashboard,viewerVisible: true },
-  { to: '/requirements',         label: 'Requirements',       icon: FileText,        viewerVisible: false },
-  { to: '/vendors',              label: 'Vendors',             icon: Users,           viewerVisible: true },
-  { to: '/records',              label: 'Records',             icon: ClipboardList,  viewerVisible: false },
-  { to: '/approvals',            label: 'Approvals',           icon: CheckCircle2,    viewerVisible: false },
-  { to: '/chat',                 label: 'AI Chat',             icon: MessageCircle,   viewerVisible: true },
-  { to: '/users',                label: 'User Management',     icon: UserCog,         viewerVisible: false },
+  { to: '/dashboard/executive',  label: 'Dashboard',         icon: LayoutDashboard, permission: 'page:dashboard.executive' },
+  { to: '/dashboard/financial',  label: 'Finance',            icon: TrendingUp,      permission: 'page:dashboard.financial' },
+  { to: '/dashboard/operations', label: 'Operations',         icon: Wrench,          permission: 'page:dashboard.operations' },
+  { to: '/dashboard/vendor',     label: 'Vendor Dashboard',   icon: Users,           permission: 'page:dashboard.vendor' },
+  { to: '/dashboard/venue',      label: 'Venue Dashboard',    icon: LayoutDashboard, permission: 'page:dashboard.venue' },
+  { to: '/requirements',         label: 'Requirements',       icon: FileText,        permission: 'page:requirements' },
+  { to: '/vendors',              label: 'Vendors',             icon: Users,           permission: 'page:vendors' },
+  { to: '/records',              label: 'Records',             icon: ClipboardList,   permission: 'page:records' },
+  { to: '/approvals',            label: 'Approvals',           icon: CheckCircle2,    permission: 'page:approvals' },
+  { to: '/chat',                 label: 'AI Chat',             icon: MessageCircle,   permission: 'page:chat' },
+  { to: '/users',                label: 'User Management',     icon: UserCog,         permission: 'manage_users' },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -31,15 +31,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen]   = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const restoreRef = useRef<HTMLInputElement>(null);
-  const isViewer = currentUser?.role === 'viewer';
-  const isZonalUser = currentUser?.role === 'zonal_user';
-  const visibleNavItems = navItems.filter(item =>
-    item.to === '/users' ? can('manage_users')
-      : item.to === '/approvals' ? can('view_approvals')
-        : isZonalUser
-          ? ['/requirements', '/vendors', '/records'].includes(item.to)
-          : (!isViewer || item.viewerVisible)
-  );
+  const visibleNavItems = navItems.filter(item => can(item.permission));
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -111,16 +103,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     <p className="text-xs font-semibold text-gray-800">{currentUser?.name}</p>
                     <p className="text-xs text-gray-500 capitalize">{currentUser?.role.replace('_', ' ')}</p>
                   </div>
-                  {!isViewer && (
+                  {can('export_data') && (
                     <>
                       <button onClick={() => { exportBackup(data); setUserMenuOpen(false); }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
                         <Download size={13} /> Download Backup
                       </button>
-                      <label className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer">
-                        <Upload size={13} /> Restore Backup
-                        <input ref={restoreRef} type="file" accept=".json" className="hidden" onChange={handleRestore} />
-                      </label>
+                      {can('manage_access') && (
+                        <label className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer">
+                          <Upload size={13} /> Restore Backup
+                          <input ref={restoreRef} type="file" accept=".json" className="hidden" onChange={handleRestore} />
+                        </label>
+                      )}
                     </>
                   )}
                   <div className="border-t mt-1">

@@ -84,9 +84,13 @@ export default function InstallationFormPage() {
   const venues = scopedRequirements.filter(r => r.clientName === selectedClient && r.examName === selectedExam);
   const selectedReq = scopedRequirements.find(r => r.id === selectedReqId);
   const zoneVendors = data.vendors.filter(v => selectedReq && sameZone(v.zone, selectedReq.zone));
-  const canEditRecord = !existingRecord || currentUser?.role !== 'zonal_user' ||
-    (existingRecord.approvalStatus === 'returned' &&
-      data.requirements.find(requirement => requirement.id === existingRecord.requirementId)?.zone === currentUser.zone);
+  const canEditRecord = !existingRecord ||
+    (
+      ((currentUser?.role !== 'zonal_user' && currentUser?.role !== 'custom') ||
+        existingRecord.approvalStatus === 'returned') &&
+      (currentUser?.role !== 'zonal_user' ||
+        data.requirements.find(requirement => requirement.id === existingRecord.requirementId)?.zone === currentUser.zone)
+    );
   const lastSendBack = existingRecord
     ? data.approvalEvents
       .filter(event => event.installationRecordId === existingRecord.id && event.action === 'sent_back')

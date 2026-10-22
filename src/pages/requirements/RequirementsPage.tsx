@@ -26,6 +26,7 @@ export default function RequirementsPage() {
   const [filterZone, setFilterZone] = useState('');
   const [filterState, setFilterState] = useState('');
   const [filterCity, setFilterCity] = useState('');
+  const [filterTcCode, setFilterTcCode] = useState('');
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
@@ -44,6 +45,11 @@ export default function RequirementsPage() {
   const cities = [...new Set(scopedRequirements
     .filter(r => (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState))
     .map(r => r.city))].sort();
+  const tcCodes = [...new Set(scopedRequirements
+    .filter(r => (!filterClient || r.clientName === filterClient) && (!filterExam || r.examName === filterExam) &&
+      (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState) &&
+      (!filterCity || r.city === filterCity))
+    .map(r => r.tcCode))].sort();
 
   const filtered = scopedRequirements.filter(r => {
     if (filterClient && r.clientName !== filterClient) return false;
@@ -51,6 +57,7 @@ export default function RequirementsPage() {
     if (filterZone && r.zone !== filterZone) return false;
     if (filterState && r.state !== filterState) return false;
     if (filterCity && r.city !== filterCity) return false;
+    if (filterTcCode && r.tcCode !== filterTcCode) return false;
     if (search) {
       const s = search.toLowerCase();
       return r.tcCode.toLowerCase().includes(s) || r.tcName.toLowerCase().includes(s) ||
@@ -159,13 +166,13 @@ export default function RequirementsPage() {
           <Button variant="outline" size="sm" onClick={() => downloadTemplate('requirement')}>
             <Download size={14} /> Template
           </Button>
-          {can('upload_master') && (
+          {can('upload_requirements') && (
             <>
               <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Upload</Button>
               <input ref={fileInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
             </>
           )}
-          {can('upload_master') && (
+          {can('manage_requirements') && (
             <Button size="sm" onClick={() => setAddModal(true)}><Plus size={14} /> Add</Button>
           )}
         </div>
@@ -194,8 +201,10 @@ export default function RequirementsPage() {
           options={clients.map(c => ({ value: c, label: c }))} placeholder="All Clients" className="w-44" />
         <Select label="Exam" value={filterExam} onChange={e => { setFilterExam(e.target.value); setPage(1); }}
           options={exams.map(e => ({ value: e, label: e }))} placeholder="All Exams" className="w-44" />
-        {(filterClient || filterExam || filterZone || filterState || filterCity || search) && (
-          <Button variant="ghost" size="sm" className="mb-0.5" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setFilterState(''); setFilterCity(''); setSearch(''); setPage(1); }}>Clear filters</Button>
+        <Select label="TC Code" value={filterTcCode} onChange={e => { setFilterTcCode(e.target.value); setPage(1); }}
+          options={tcCodes.map(code => ({ value: code, label: code }))} placeholder="All TC Codes" className="w-40" />
+        {(filterClient || filterExam || filterZone || filterState || filterCity || filterTcCode || search) && (
+          <Button variant="ghost" size="sm" className="mb-0.5" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setFilterState(''); setFilterCity(''); setFilterTcCode(''); setSearch(''); setPage(1); }}>Clear filters</Button>
         )}
         </div>
       </div>
@@ -255,7 +264,7 @@ export default function RequirementsPage() {
                 <td className="px-4 py-3 font-mono text-xs">{r.tcCode}</td>
                 <td className="px-4 py-3">{r.tcName}</td>
                 <td className="px-4 py-3">
-                  {can('delete_master') && (
+                  {can('delete_requirements') && (
                     <Button variant="danger" size="sm" onClick={() => handleDelete(r.id)}>
                       <Trash2 size={12} />
                     </Button>

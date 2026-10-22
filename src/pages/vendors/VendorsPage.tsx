@@ -164,13 +164,13 @@ export default function VendorsPage() {
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => downloadTemplate('vendor')}><Download size={14} /> Template</Button>
           <Button variant="outline" size="sm" onClick={() => exportVendorsToExcel(scopedVendors)}><Download size={14} /> Download Data</Button>
-          {can('upload_master') && (
+          {can('upload_vendors') && (
             <>
               <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}><Upload size={14} /> Upload</Button>
               <input ref={fileInputRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileUpload} />
             </>
           )}
-          {can('upload_master') && <Button size="sm" onClick={() => {
+          {can('manage_vendors') && <Button size="sm" onClick={() => {
             setForm({ vendorCode: '', zone: '', vendorName: '' });
             setFormError('');
             setAddModal(true);
@@ -230,7 +230,7 @@ export default function VendorsPage() {
                   <td className="px-4 py-3">{v.vendorName}</td>
                   <td className="px-4 py-3 text-xs text-gray-500">{new Date(v.createdAt).toLocaleDateString('en-IN')}</td>
                   <td className="px-4 py-3">
-                    {can('delete_master') && <Button variant="danger" size="sm" onClick={() => handleDelete(v.id)}><Trash2 size={12} /></Button>}
+                    {can('delete_vendors') && <Button variant="danger" size="sm" onClick={() => handleDelete(v.id)}><Trash2 size={12} /></Button>}
                   </td>
                 </tr>
               ))}
