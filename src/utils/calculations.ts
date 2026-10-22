@@ -85,7 +85,7 @@ export function applyDashboardFilters(
     if (filters.client && req.clientName !== filters.client) return false;
     if (filters.exam && req.examName !== filters.exam) return false;
     if (filters.zone && req.zone !== filters.zone) return false;
-    if (filters.tcCode && req.tcCode !== filters.tcCode) return false;
+    if (filters.tcCode && req.tcCode.replace(/\D/g, '') !== filters.tcCode) return false;
     if (filters.startDate || filters.endDate) {
       const dates = examDates.filter(d => d.installationRecordId === inst.id).map(d => d.examDate);
       if (!dates.some(d =>
@@ -114,7 +114,7 @@ export function getRequirementCompletion(
       (filters.client && requirement.clientName !== filters.client) ||
       (filters.exam && requirement.examName !== filters.exam) ||
       (filters.zone && requirement.zone !== filters.zone) ||
-      (filters.tcCode && requirement.tcCode !== filters.tcCode)
+      (filters.tcCode && requirement.tcCode.replace(/\D/g, '') !== filters.tcCode)
     ) return false;
     return true;
   });

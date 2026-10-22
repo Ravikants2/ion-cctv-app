@@ -133,7 +133,7 @@ describe('applyDashboardFilters', () => {
   });
 
   it('filters by TC Code', () => {
-    const result = applyDashboardFilters([inst1, inst2], [req1, req2], examDates, { ...emptyFilters, tcCode: 'TC002' });
+    const result = applyDashboardFilters([inst1, inst2], [req1, req2], examDates, { ...emptyFilters, tcCode: '002' });
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('i2');
   });

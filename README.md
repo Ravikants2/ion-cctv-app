@@ -100,7 +100,9 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 - Approval comparisons for previous venue costs and quotations, vendor reuse across locations, and project-level total/per-candidate cost rankings
 - Zonal user accounts restricted to their assigned zone across Requirements, Records, and Vendors; returned quotes require a resubmission note
 - Configurable custom access roles and groups: Super Admins choose page/action permissions and zone scopes; group and role scopes are intersected, and users with no assigned zones see no venue data
-- TC Code filters on the dashboard, requirements, records, and approval queue
+- Numeric-only, free-written TC Codes and TC Code filters on the dashboard, requirements, records, and approval queue
+- Approval review hierarchy by client and exam, with selectable TC venues, select-all and bulk approval, and per-venue discrepancy remarks
+- Drill-down past-cost records with venue, vendor, installation, quote-revision, and approval-history details
 - Existing installation records without approval metadata are migrated to pending Surveillance Head review; records with explicit final approval remain approved
 - Excel export + PDF/Print reports (A4 landscape)
 - Role-based access: Super Admin / Sub Admin / User / Viewer / Zonal User / Surveillance Head / Head of Enablement / configured custom roles

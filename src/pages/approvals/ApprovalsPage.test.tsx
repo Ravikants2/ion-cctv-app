@@ -118,4 +118,29 @@ describe('ApprovalsPage', () => {
       remarks: 'Please confirm the camera count and update the quote.',
     });
   });
+
+  it('selects TC venues for bulk approval and requires remarks for cost discrepancies', () => {
+    render(<ApprovalsPage />);
+
+    fireEvent.change(screen.getByLabelText('Client Name'), { target: { value: 'Client' } });
+    fireEvent.change(screen.getByLabelText('Exam Name'), { target: { value: 'Exam' } });
+    fireEvent.click(screen.getByLabelText('Select all 1 matching TC venues'));
+    fireEvent.click(screen.getByRole('button', { name: /Approve selected venues \(1\)/ }));
+
+    expect(screen.getByText(/remarks for each selected venue with a cost discrepancy/i)).toBeInTheDocument();
+    expect(screen.getByText(/Enter approval remarks for each selected venue/i)).toBeInTheDocument();
+    expect(updateData).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks' }), {
+      target: { value: 'Reviewed the venue increase against the updated scope.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Approve selected venues \(1\)/ }));
+
+    expect(updatedData?.installations[0].approvalStage).toBe('enablement_head');
+    expect(updatedData?.approvalEvents[0]).toMatchObject({
+      action: 'approved',
+      remarks: 'Reviewed the venue increase against the updated scope.',
+      stage: 'surveillance_head',
+    });
+  });
 });

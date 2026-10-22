@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Alert, Modal } from '../../components/ui/index';
 import { Button } from '../../components/ui/Button';
-import { Input, Textarea } from '../../components/ui/FormFields';
+import { Input, Select, Textarea } from '../../components/ui/FormFields';
 import { useAuth } from '../../context/AuthContext';
 import type {
   ApprovalEvent,
@@ -44,15 +44,56 @@ function getRevisionHistory(revisions: QuoteRevision[], recordId: string) {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+function getCostRiskFlags(
+  record: InstallationRecord,
+  requirements: ReturnType<typeof useAuth>['data']['requirements'],
+  installations: InstallationRecord[],
+  revisions: QuoteRevision[],
+  examDates: Array<{ installationRecordId: string; scheduledCandidates: number }>
+) {
+  const requirement = requirements.find(item => item.id === record.requirementId);
+  if (!requirement) return [];
+  const history = getRevisionHistory(revisions, record.id);
+  const previous = history.length > 1 ? history[history.length - 2] : undefined;
+  const increase = previous && previous.localVendorCost > 0
+    ? (record.localVendorCost - previous.localVendorCost) / previous.localVendorCost
+    : undefined;
+  const candidates = getCandidateCount(record, revisions, examDates);
+  const peerCosts = installations.flatMap(peer => {
+    if (peer.id === record.id) return [];
+    const peerRequirement = requirements.find(item => item.id === peer.requirementId);
+    if (peerRequirement?.clientName !== requirement.clientName ||
+      peerRequirement.examName !== requirement.examName) return [];
+    const peerCandidates = getCandidateCount(peer, revisions, examDates);
+    return peerCandidates > 0 ? [peer.localVendorCost / peerCandidates] : [];
+  });
+  const averagePeerCost = peerCosts.length > 0
+    ? peerCosts.reduce((total, cost) => total + cost, 0) / peerCosts.length
+    : 0;
+  const perCandidate = candidates > 0 ? record.localVendorCost / candidates : 0;
+  return [
+    increase !== undefined && increase > 0.2
+      ? `Quote is ${Math.round(increase * 100)}% higher than the previous quote for this venue.`
+      : undefined,
+    averagePeerCost > 0 && perCandidate > averagePeerCost * 1.25
+      ? `Per-candidate cost is more than 25% above the other venues in this exam project (${money(averagePeerCost)} average).`
+      : undefined,
+  ].filter((flag): flag is string => Boolean(flag));
+}
+
 export default function ApprovalsPage() {
   const { data, updateData, addAuditLog, currentUser, can } = useAuth();
   const [selectedId, setSelectedId] = useState('');
   const [tcCodeFilter, setTcCodeFilter] = useState('');
-  const [remarks, setRemarks] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+  const [examFilter, setExamFilter] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [remarksByRecord, setRemarksByRecord] = useState<Record<string, string>>({});
   const [exceptionApproval, setExceptionApproval] = useState(false);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [blanketModalOpen, setBlanketModalOpen] = useState(false);
   const [blanketRemarks, setBlanketRemarks] = useState('');
+  const [pastCostModalOpen, setPastCostModalOpen] = useState(false);
 
   const allowedStages: ApprovalStage[] = [
     ...(can('approve_surveillance') ? ['surveillance_head' as const] : []),
@@ -63,9 +104,21 @@ export default function ApprovalsPage() {
       allowedStages.includes(record.approvalStage || 'surveillance_head'))
     .map(record => record.approvalStage ? record : { ...record, approvalStage: 'surveillance_head' as const })
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  const clientOptions = [...new Set(queue.flatMap(record => {
+    const requirement = data.requirements.find(item => item.id === record.requirementId);
+    return requirement ? [requirement.clientName] : [];
+  }))].sort();
+  const examOptions = [...new Set(queue.flatMap(record => {
+    const requirement = data.requirements.find(item => item.id === record.requirementId);
+    return requirement && (!clientFilter || requirement.clientName === clientFilter)
+      ? [requirement.examName]
+      : [];
+  }))].sort();
   const filteredQueue = queue.filter(record => {
     const requirement = data.requirements.find(item => item.id === record.requirementId);
-    return !tcCodeFilter || requirement?.tcCode.toLowerCase().includes(tcCodeFilter.trim().toLowerCase());
+    return (!clientFilter || requirement?.clientName === clientFilter) &&
+      (!examFilter || requirement?.examName === examFilter) &&
+      (!tcCodeFilter || requirement?.tcCode.replace(/\D/g, '').includes(tcCodeFilter));
   });
   const selectedRecord = filteredQueue.find(record => record.id === selectedId) || filteredQueue[0];
   const selectedRequirement = selectedRecord
@@ -97,11 +150,6 @@ export default function ApprovalsPage() {
     });
   }, [data.installations, data.requirements, data.quoteRevisions, data.examDates, selectedRecord, selectedRequirement]);
 
-  const otherProjectVenues = projectVenues.filter(item => item.record.id !== selectedRecord?.id);
-  const averageProjectPerCandidate = otherProjectVenues.length > 0
-    ? otherProjectVenues.reduce((total, item) => total + item.perCandidate, 0) /
-      Math.max(1, otherProjectVenues.filter(item => item.candidates > 0).length)
-    : 0;
   const isHighestTotal = projectVenues.length > 1 &&
     selectedRecord?.localVendorCost === Math.max(...projectVenues.map(item => item.cost));
   const comparablePerCandidate = projectVenues.filter(item => item.candidates > 0);
@@ -129,8 +177,6 @@ export default function ApprovalsPage() {
   const increaseFromPrevious = previousRevision && previousRevision.localVendorCost > 0
     ? (selectedRecord!.localVendorCost - previousRevision.localVendorCost) / previousRevision.localVendorCost
     : undefined;
-  const costOutlier = averageProjectPerCandidate > 0 &&
-    costPerCandidate > averageProjectPerCandidate * 1.25;
   const revisionChanges = previousRevision && currentRevision && selectedRecord ? [
     {
       label: 'Total quote',
@@ -188,14 +234,9 @@ export default function ApprovalsPage() {
       changed: previousRevision.quotationFileId !== currentRevision.quotationFileId,
     },
   ].filter(change => change.changed) : [];
-  const riskFlags = [
-    increaseFromPrevious !== undefined && increaseFromPrevious > 0.2
-      ? `Quote is ${Math.round(increaseFromPrevious * 100)}% higher than the previous quote for this venue.`
-      : undefined,
-    costOutlier
-      ? `Per-candidate cost is more than 25% above the other venues in this exam project (${money(averageProjectPerCandidate)} average).`
-      : undefined,
-  ].filter((flag): flag is string => Boolean(flag));
+  const riskFlags = selectedRecord
+    ? getCostRiskFlags(selectedRecord, data.requirements, data.installations, data.quoteRevisions, data.examDates)
+    : [];
   const currentStage = selectedRecord?.approvalStage || (selectedRecord?.approvalStatus !== 'approved' ? 'surveillance_head' : undefined);
   const isAllowedToAct = !!currentStage && (
     (currentStage === 'surveillance_head' && can('approve_surveillance')) ||
@@ -216,10 +257,14 @@ export default function ApprovalsPage() {
       .filter(event => event.installationRecordId === selectedRecord.id)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     : [];
+  const selectedVisibleIds = selectedIds.filter(id => filteredQueue.some(record => record.id === id));
+  const allVisibleSelected = filteredQueue.length > 0 && filteredQueue.every(record => selectedVisibleIds.includes(record.id));
+  const selectedApprovalRecords = filteredQueue.filter(record => selectedVisibleIds.includes(record.id));
+  const canSelectVenues = Boolean(clientFilter && examFilter);
 
   const handleDecision = (action: 'approved' | 'sent_back') => {
     if (!selectedRecord || !currentStage || !isAllowedToAct) return;
-    const note = remarks.trim();
+    const note = (remarksByRecord[selectedRecord.id] || '').trim();
     if (action === 'sent_back' && !note) {
       setAlert({ type: 'error', message: 'Remarks are mandatory when sending a quote back.' });
       return;
@@ -263,9 +308,77 @@ export default function ApprovalsPage() {
           ? `Approved by ${stageTitle[currentStage]}; forwarded to ${stageTitle[nextStage]}.`
           : 'Quote approved by both levels.',
     });
-    setRemarks('');
+    setRemarksByRecord(previous => ({ ...previous, [selectedRecord.id]: '' }));
     setExceptionApproval(false);
     setSelectedId('');
+  };
+
+  const handleApproveSelected = () => {
+    if (selectedApprovalRecords.length === 0) return;
+    const recordsWithoutRevision = selectedApprovalRecords.filter(record =>
+      !getLatestRevision(data.quoteRevisions, record.id)
+    );
+    if (recordsWithoutRevision.length > 0) {
+      setSelectedId(recordsWithoutRevision[0].id);
+      setAlert({ type: 'error', message: 'Selected quote is missing its revision snapshot. Review it individually before approving.' });
+      return;
+    }
+    const firstMissingRemark = selectedApprovalRecords.find(record =>
+      (getCostRiskFlags(record, data.requirements, data.installations, data.quoteRevisions, data.examDates).length > 0 ||
+        (record.id === selectedRecord?.id && exceptionApproval)) &&
+      !(remarksByRecord[record.id] || '').trim()
+    );
+    if (firstMissingRemark) {
+      setSelectedId(firstMissingRemark.id);
+      setAlert({ type: 'error', message: 'Enter approval remarks for each selected venue with a cost discrepancy or exception.' });
+      return;
+    }
+    if (selectedApprovalRecords.some(record =>
+      !allowedStages.includes(record.approvalStage || 'surveillance_head')
+    )) {
+      setAlert({ type: 'error', message: 'One or more selected quotes are not available at your approval stage.' });
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    const events: ApprovalEvent[] = selectedApprovalRecords.map(record => {
+      const stage = record.approvalStage || 'surveillance_head';
+      const revision = getLatestRevision(data.quoteRevisions, record.id)!;
+      return {
+        id: uuidv4(),
+        installationRecordId: record.id,
+        stage,
+        action: 'approved',
+        userId: currentUser!.id,
+        remarks: (remarksByRecord[record.id] || '').trim(),
+        exception: record.id === selectedRecord?.id ? exceptionApproval : undefined,
+        quoteRevisionId: revision.id,
+        createdAt,
+      };
+    });
+    updateData(previous => ({
+      ...previous,
+      installations: previous.installations.map(record => {
+        const event = events.find(item => item.installationRecordId === record.id);
+        if (!event) return record;
+        const nextStage = event.stage === 'surveillance_head' ? 'enablement_head' : undefined;
+        return {
+          ...record,
+          approvalStatus: nextStage ? 'pending' : 'approved',
+          approvalStage: nextStage,
+          updatedAt: createdAt,
+        };
+      }),
+      approvalEvents: [...previous.approvalEvents, ...events],
+    }));
+    events.forEach(event => addAuditLog('UPDATE', 'InstallationApproval', event.installationRecordId, undefined, event));
+    setSelectedIds([]);
+    setSelectedId('');
+    setExceptionApproval(false);
+    setAlert({
+      type: 'success',
+      message: `${events.length} selected ${events.length === 1 ? 'venue was' : 'venues were'} approved and advanced to the next approval stage where applicable.`,
+    });
   };
 
   const handleBlanketApproval = (event: React.FormEvent<HTMLFormElement>) => {
@@ -357,6 +470,13 @@ export default function ApprovalsPage() {
             <Layers3 size={15} /> Blanket approve exam project ({sameStageProjectPending.length})
           </Button>
         )}
+        {selectedVisibleIds.length > 0 && (
+          <Button disabled={selectedApprovalRecords.some(record =>
+            !can(record.approvalStage === 'enablement_head' ? 'approve_enablement' : 'approve_surveillance')
+          )} onClick={handleApproveSelected}>
+            <Check size={14} /> Approve selected venues ({selectedVisibleIds.length})
+          </Button>
+        )}
       </div>
 
       {alert && <Alert type={alert.type} onClose={() => setAlert(null)}>{alert.message}</Alert>}
@@ -388,8 +508,34 @@ export default function ApprovalsPage() {
             <div className="border-b border-slate-100 px-4 py-3">
               <h2 className="font-semibold text-slate-800">Review queue</h2>
               <p className="text-xs text-slate-500">{queue.length} quote{queue.length === 1 ? '' : 's'} at your level</p>
-              <Input label="Filter by TC Code" value={tcCodeFilter} onChange={event => setTcCodeFilter(event.target.value)}
-                placeholder="Enter TC Code" className="mt-2" />
+              <div className="mt-3 space-y-2">
+                <Select label="Client Name" value={clientFilter} onChange={event => {
+                  setClientFilter(event.target.value);
+                  setExamFilter('');
+                  setSelectedId('');
+                  setSelectedIds([]);
+                }} options={clientOptions.map(client => ({ value: client, label: client }))} placeholder="All clients" />
+                <Select label="Exam Name" value={examFilter} onChange={event => {
+                  setExamFilter(event.target.value);
+                  setSelectedId('');
+                  setSelectedIds([]);
+                }} options={examOptions.map(exam => ({ value: exam, label: exam }))} placeholder="All exams"
+                  disabled={!clientFilter} />
+                <Input label="Find TC Code" value={tcCodeFilter} onChange={event => {
+                  setTcCodeFilter(event.target.value.replace(/\D/g, ''));
+                  setSelectedIds([]);
+                }}
+                  placeholder="Enter numbers only" inputMode="numeric" pattern="[0-9]*" />
+              </div>
+              <label className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3 text-xs font-medium text-slate-700">
+                <input type="checkbox" checked={allVisibleSelected} disabled={!canSelectVenues}
+                  onChange={event => setSelectedIds(previous => event.target.checked
+                    ? [...new Set([...previous, ...filteredQueue.map(record => record.id)])]
+                    : previous.filter(id => !filteredQueue.some(record => record.id === id)))}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                Select all {filteredQueue.length} matching TC venues
+              </label>
+              {!canSelectVenues && <p className="mt-1 text-xs text-slate-500">Choose a client and exam to enable TC venue selection.</p>}
             </div>
             <div className="max-h-[680px] overflow-y-auto">
               {filteredQueue.map(record => {
@@ -398,25 +544,36 @@ export default function ApprovalsPage() {
                 const count = getCandidateCount(record, data.quoteRevisions, data.examDates);
                 const active = (selectedRecord?.id || selectedId) === record.id;
                 return (
-                  <button key={record.id} onClick={() => { setSelectedId(record.id); setRemarks(''); setAlert(null); }}
-                    className={`w-full border-b border-slate-100 p-4 text-left transition-colors hover:bg-slate-50 ${active ? 'bg-blue-50/70 ring-inset ring-2 ring-blue-500' : ''}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{requirement?.tcName || 'Unknown venue'}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">{requirement?.tcCode} · {requirement?.zone}</p>
-                      </div>
-                      <ChevronRight size={16} className="shrink-0 text-slate-400" />
+                  <div key={record.id} className={`border-b border-slate-100 p-3 transition-colors hover:bg-slate-50 ${active ? 'bg-blue-50/70 ring-inset ring-2 ring-blue-500' : ''}`}>
+                    <div className="flex items-start gap-2">
+                      <input type="checkbox" aria-label={`Select TC Code ${requirement?.tcCode || 'unknown'}`} disabled={!canSelectVenues}
+                        checked={selectedVisibleIds.includes(record.id)}
+                        onChange={event => setSelectedIds(previous => event.target.checked
+                          ? [...new Set([...previous, record.id])]
+                          : previous.filter(id => id !== record.id))}
+                        className="mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                      <button type="button" onClick={() => { setSelectedId(record.id); setAlert(null); }}
+                        className="min-w-0 flex-1 text-left">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900">{requirement?.tcName || 'Unknown venue'}</p>
+                            <p className="mt-0.5 text-xs text-slate-500">TC Code {requirement?.tcCode} · {requirement?.zone}</p>
+                          </div>
+                          <ChevronRight size={16} className="shrink-0 text-slate-400" />
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+                          <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
+                            {stageTitle[record.approvalStage || 'surveillance_head']}
+                          </span>
+                          <span className="font-semibold text-slate-800">{money(record.localVendorCost)}</span>
+                        </div>
+                        <p className="mt-2 truncate text-xs text-slate-500">{recordVendor?.vendorName || 'Vendor unavailable'} · {count.toLocaleString('en-IN')} candidates</p>
+                      </button>
                     </div>
-                    <div className="mt-3 flex items-center justify-between gap-2 text-xs">
-                      <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
-                        {stageTitle[record.approvalStage || 'surveillance_head']}
-                      </span>
-                      <span className="font-semibold text-slate-800">{money(record.localVendorCost)}</span>
-                    </div>
-                    <p className="mt-2 truncate text-xs text-slate-500">{recordVendor?.vendorName || 'Vendor unavailable'} · {count.toLocaleString('en-IN')} candidates</p>
-                  </button>
+                  </div>
                 );
               })}
+              {filteredQueue.length === 0 && <p className="p-4 text-sm text-slate-500">No TC venues match this client, exam, or code.</p>}
             </div>
           </aside>
 
@@ -473,7 +630,14 @@ export default function ApprovalsPage() {
 
               <section className="grid gap-5 lg:grid-cols-2">
                 <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="font-semibold text-slate-900">Past cost at this venue</h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-semibold text-slate-900">Past cost at this venue</h3>
+                    {(historicalInstallations.length > 0 || revisionHistory.length > 1) && (
+                      <Button variant="outline" size="sm" onClick={() => setPastCostModalOpen(true)}>
+                        View all past cost details ({historicalInstallations.length + Math.max(0, revisionHistory.length - 1)})
+                      </Button>
+                    )}
+                  </div>
                   {previousRevision ? (
                     <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -620,8 +784,20 @@ export default function ApprovalsPage() {
                   <p className="mt-1 text-xs text-slate-500">Send-back remarks are always mandatory. Approval remarks are mandatory when a cost alert is raised or an exception is selected.</p>
                 </div>
                 <div className="space-y-4">
-                  <Textarea label="Remarks" value={remarks} onChange={event => setRemarks(event.target.value)} rows={3}
-                    placeholder="Record the reason for approval or the corrections required from the zonal user." />
+                  <p className="text-xs font-medium text-slate-500">Approval remarks for TC Code {selectedRequirement.tcCode}</p>
+                  <Textarea label="Remarks"
+                    value={remarksByRecord[selectedRecord.id] || ''}
+                    onChange={event => setRemarksByRecord(previous => ({
+                      ...previous,
+                      [selectedRecord.id]: event.target.value,
+                    }))}
+                    rows={3}
+                    placeholder="Explain why this venue's quote is being approved, especially any cost discrepancy." />
+                  {selectedVisibleIds.length > 1 && (
+                    <p className="text-xs text-slate-500">
+                      Add remarks for each selected venue with a cost discrepancy. Select each TC Code to enter its remarks before bulk approval.
+                    </p>
+                  )}
                   <label className="flex items-start gap-2 text-sm text-slate-700">
                     <input type="checkbox" checked={exceptionApproval} onChange={event => setExceptionApproval(event.target.checked)}
                       className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
@@ -673,6 +849,98 @@ export default function ApprovalsPage() {
           )}
         </div>
       )}
+
+      <Modal open={pastCostModalOpen} onClose={() => setPastCostModalOpen(false)} title={`Past cost details · TC Code ${selectedRequirement?.tcCode || ''}`}>
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+          {selectedRecord && selectedRequirement && revisionHistory.length > 1 && (
+            <article className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+              <h3 className="font-semibold text-slate-900">Previous quotations for this venue · {selectedRequirement.tcName}</h3>
+              <ol className="mt-3 space-y-2">
+                {revisionHistory.slice(0, -1).reverse().map((revision, index) => (
+                  <li key={revision.id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg bg-white p-3 text-xs">
+                    <div>
+                      <p className="font-semibold text-slate-800">Quote {revisionHistory.length - index - 1} · {dateLabel(revision.createdAt)}</p>
+                      <p className="mt-1 text-slate-600">
+                        {data.vendors.find(item => item.id === revision.vendorId)?.vendorName || 'Vendor unavailable'} · {revision.installationType} · {revision.cameraCount} cameras · {revision.totalCandidates.toLocaleString('en-IN')} candidates
+                      </p>
+                      {revision.remarks && <p className="mt-1 text-slate-600">Remarks: {revision.remarks}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-slate-900">{money(revision.localVendorCost)}</p>
+                      {revision.quotationFileId && <Button variant="outline" size="sm" onClick={() => openQuotation(revision.quotationFileId)}>View quotation</Button>}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </article>
+          )}
+          {historicalInstallations.map(record => {
+            const requirement = data.requirements.find(item => item.id === record.requirementId);
+            const pastVendor = data.vendors.find(item => item.id === record.vendorId);
+            const pastCandidates = getCandidateCount(record, data.quoteRevisions, data.examDates);
+            const pastRevisions = getRevisionHistory(data.quoteRevisions, record.id);
+            const pastEvents = data.approvalEvents
+              .filter(event => event.installationRecordId === record.id)
+              .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+            return (
+              <article key={record.id} className="rounded-xl border border-slate-200 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-slate-900">{requirement?.tcName || 'Venue unavailable'} · {requirement?.tcCode}</h3>
+                    <p className="text-xs text-slate-500">{requirement?.clientName} · {requirement?.examName} · {requirement?.city}, {requirement?.state} · {requirement?.zone}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-slate-900">{money(record.localVendorCost)}</p>
+                    <p className="text-xs text-slate-500">Updated {dateLabel(record.updatedAt)}</p>
+                  </div>
+                </div>
+                <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                  <div><dt className="text-slate-500">Vendor</dt><dd className="font-medium text-slate-800">{pastVendor?.vendorName || 'Unavailable'}</dd></div>
+                  <div><dt className="text-slate-500">Installation</dt><dd className="font-medium text-slate-800">{record.installationType}</dd></div>
+                  <div><dt className="text-slate-500">Candidates / per-candidate cost</dt><dd className="font-medium text-slate-800">{pastCandidates.toLocaleString('en-IN')} / {pastCandidates > 0 ? money(record.localVendorCost / pastCandidates) : 'Unavailable'}</dd></div>
+                  <div><dt className="text-slate-500">Cameras / minimum cost</dt><dd className="font-medium text-slate-800">{record.cameraCount} / {record.minimumCost === undefined ? 'Unavailable' : money(record.minimumCost)}</dd></div>
+                  <div><dt className="text-slate-500">Internet / proxy / storage</dt><dd className="font-medium text-slate-800">{record.internetProvided ? 'Internet' : 'No internet'} / {record.proxyProvided ? 'Proxy' : 'No proxy'} / {record.storageProvided ? `${record.storageQuantity || ''} ${record.storageSize || ''} ${record.storageUnit || ''} ${record.storageType || ''}`.trim() : 'No storage'}</dd></div>
+                  <div><dt className="text-slate-500">Record remarks</dt><dd className="font-medium text-slate-800">{record.remarks || 'None'}</dd></div>
+                </dl>
+                {pastRevisions.length > 0 && (
+                  <div className="mt-4 border-t border-slate-100 pt-3">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Quote revisions</h4>
+                    <ol className="mt-2 space-y-2">
+                      {pastRevisions.slice().reverse().map((revision, index) => (
+                        <li key={revision.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg bg-slate-50 p-2 text-xs">
+                          <div>
+                            <p className="font-medium text-slate-800">{index === 0 ? 'Latest quote' : `Earlier quote ${pastRevisions.length - index}`} · {dateLabel(revision.createdAt)}</p>
+                            <p className="text-slate-500">{revision.installationType} · {revision.cameraCount} cameras · {revision.totalCandidates.toLocaleString('en-IN')} candidates · {data.vendors.find(item => item.id === revision.vendorId)?.vendorName || 'Vendor unavailable'}</p>
+                            {revision.remarks && <p className="mt-1 text-slate-600">Remarks: {revision.remarks}</p>}
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-slate-900">{money(revision.localVendorCost)}</p>
+                            {revision.quotationFileId && <Button variant="outline" size="sm" onClick={() => openQuotation(revision.quotationFileId)}>View quotation</Button>}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {pastEvents.length > 0 && (
+                  <div className="mt-4 border-t border-slate-100 pt-3">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Approval history</h4>
+                    <ol className="mt-2 space-y-2">
+                      {pastEvents.map(event => (
+                        <li key={event.id} className="text-xs text-slate-600">
+                          <strong>{stageTitle[event.stage]} · {event.action === 'approved' ? 'Approved' : 'Sent back'}</strong>
+                          {' · '}{data.users.find(user => user.id === event.userId)?.name || 'Former user'} · {dateLabel(event.createdAt)}
+                          {event.remarks && <p className="mt-0.5">{event.remarks}</p>}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </Modal>
 
       <Modal open={blanketModalOpen} onClose={() => setBlanketModalOpen(false)} title="Blanket approval for exam project">
         <form onSubmit={handleBlanketApproval} className="space-y-4">

@@ -45,19 +45,13 @@ export default function RequirementsPage() {
   const cities = [...new Set(scopedRequirements
     .filter(r => (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState))
     .map(r => r.city))].sort();
-  const tcCodes = [...new Set(scopedRequirements
-    .filter(r => (!filterClient || r.clientName === filterClient) && (!filterExam || r.examName === filterExam) &&
-      (!filterZone || r.zone === filterZone) && (!filterState || r.state === filterState) &&
-      (!filterCity || r.city === filterCity))
-    .map(r => r.tcCode))].sort();
-
   const filtered = scopedRequirements.filter(r => {
     if (filterClient && r.clientName !== filterClient) return false;
     if (filterExam && r.examName !== filterExam) return false;
     if (filterZone && r.zone !== filterZone) return false;
     if (filterState && r.state !== filterState) return false;
     if (filterCity && r.city !== filterCity) return false;
-    if (filterTcCode && r.tcCode !== filterTcCode) return false;
+    if (filterTcCode && r.tcCode.replace(/\D/g, '') !== filterTcCode) return false;
     if (search) {
       const s = search.toLowerCase();
       return r.tcCode.toLowerCase().includes(s) || r.tcName.toLowerCase().includes(s) ||
@@ -78,6 +72,9 @@ export default function RequirementsPage() {
       const previewRows: PreviewRow[] = rows.map(row => {
         if (!row.zone || !row.state || !row.city || !row.tcCode || !row.tcName || !row.clientName || !row.examName) {
           return { ...row, status: 'ERROR', error: 'Missing required fields' };
+        }
+        if (!/^\d+$/.test(row.tcCode)) {
+          return { ...row, status: 'ERROR', error: 'TC Code must contain numbers only' };
         }
         const existing = scopedRequirements.find(r =>
           r.clientName === row.clientName && r.examName === row.examName && r.tcCode === row.tcCode
@@ -138,6 +135,10 @@ export default function RequirementsPage() {
     const { zone, state, city, tcCode, tcName, clientName, examName } = form;
     if (!zone || !state || !city || !tcCode || !tcName || !clientName || !examName) {
       setFormError('All fields are required.');
+      return;
+    }
+    if (!/^\d+$/.test(tcCode)) {
+      setFormError('TC Code must contain numbers only.');
       return;
     }
     const dup = scopedRequirements.find(r => r.clientName === clientName && r.examName === examName && r.tcCode === tcCode);
@@ -201,8 +202,9 @@ export default function RequirementsPage() {
           options={clients.map(c => ({ value: c, label: c }))} placeholder="All Clients" className="w-44" />
         <Select label="Exam" value={filterExam} onChange={e => { setFilterExam(e.target.value); setPage(1); }}
           options={exams.map(e => ({ value: e, label: e }))} placeholder="All Exams" className="w-44" />
-        <Select label="TC Code" value={filterTcCode} onChange={e => { setFilterTcCode(e.target.value); setPage(1); }}
-          options={tcCodes.map(code => ({ value: code, label: code }))} placeholder="All TC Codes" className="w-40" />
+        <Input label="TC Code" value={filterTcCode}
+          onChange={e => { setFilterTcCode(e.target.value.replace(/\D/g, '')); setPage(1); }}
+          inputMode="numeric" pattern="[0-9]*" placeholder="Numbers only" className="w-40" />
         {(filterClient || filterExam || filterZone || filterState || filterCity || filterTcCode || search) && (
           <Button variant="ghost" size="sm" className="mb-0.5" onClick={() => { setFilterClient(''); setFilterExam(''); setFilterZone(''); setFilterState(''); setFilterCity(''); setFilterTcCode(''); setSearch(''); setPage(1); }}>Clear filters</Button>
         )}
@@ -290,7 +292,13 @@ export default function RequirementsPage() {
         <form onSubmit={handleAddSubmit} className="grid grid-cols-2 gap-3">
           {(['zone','state','city','tcCode','tcName','clientName','examName'] as const).map(field => (
             <Input key={field} label={field.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}
-              value={form[field] || ''} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))} required />
+              value={form[field] || ''}
+              onChange={e => setForm(p => ({
+                ...p,
+                [field]: field === 'tcCode' ? e.target.value.replace(/\D/g, '') : e.target.value,
+              }))}
+              {...(field === 'tcCode' ? { inputMode: 'numeric' as const, pattern: '[0-9]*' } : {})}
+              required />
           ))}
           {formError && <div className="col-span-2"><Alert type="error">{formError}</Alert></div>}
           <div className="col-span-2 flex gap-2 justify-end mt-2">
