@@ -3,10 +3,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { Alert, Modal } from '../../components/ui/index';
 import { Button } from '../../components/ui/Button';
 import { Input, Select, Textarea } from '../../components/ui/FormFields';
+import { TablePagination } from '../../components/ui/TablePagination';
 import { useAuth } from '../../context/AuthContext';
-import { normalizeExamDate } from '../../utils/dates';
+import { formatExamDate, normalizeExamDate } from '../../utils/dates';
 import type { ApprovalEvent, ApprovalStage, ApprovalStatus, InstallationRecord, QuoteRevision } from '../../types';
 import { AlertCircle, Check, CornerUpLeft, History } from 'lucide-react';
+
+const PAGE_SIZE = 10;
 
 const stageTitle: Record<ApprovalStage, string> = {
   surveillance_head: 'Surveillance Head',
@@ -45,7 +48,9 @@ export default function ApprovalsPage() {
   const [clientFilter, setClientFilter] = useState('');
   const [examFilter, setExamFilter] = useState('');
   const [tcCodeFilter, setTcCodeFilter] = useState('');
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [remarksByRecord, setRemarksByRecord] = useState<Record<string, string>>({});
   const [exceptionByRecord, setExceptionByRecord] = useState<Record<string, boolean>>({});
   const [detailRecordId, setDetailRecordId] = useState('');
@@ -131,7 +136,12 @@ export default function ApprovalsPage() {
       (!examFilter || requirement?.examName === examFilter) &&
       (!tcCodeFilter || requirement?.tcCode.replace(/\D/g, '').includes(tcCodeFilter));
   });
-  const selectedRecord = filteredQueue.find(record => record.id === selectedId) || filteredQueue[0];
+  const pageCount = Math.max(1, Math.ceil(filteredQueue.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageQueue = filteredQueue.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const selectedQueue = filteredQueue.filter(record => selectedIds.includes(record.id));
+  const allFilteredSelected = filteredQueue.length > 0 && selectedQueue.length === filteredQueue.length;
+  const selectedRecord = filteredQueue.find(record => record.id === selectedId) || pageQueue[0];
   const selectedRequirement = selectedRecord
     ? indexes.requirementsById.get(selectedRecord.requirementId)
     : undefined;
@@ -156,15 +166,13 @@ export default function ApprovalsPage() {
       item.requirement.clientName === selectedRequirement.clientName &&
       item.requirement.examName === selectedRequirement.examName)
     : [];
-  const venueSchedule = currentExamVenueRecords.flatMap<{
-    record: InstallationRecord;
-    schedule: (typeof data.examDates)[number] | undefined;
-  }>(({ record }) => {
-    const schedules = indexes.schedulesByRecord.get(record.id) || [];
-    return schedules.length > 0
-      ? schedules.map(schedule => ({ record, schedule }))
-      : [{ record, schedule: undefined }];
-  });
+  const venueSchedule = currentExamVenueRecords.map(({ record, requirement }) => ({
+    record,
+    requirement,
+    dates: [...new Set((indexes.schedulesByRecord.get(record.id) || [])
+      .map(schedule => normalizeExamDate(schedule.examDate) || schedule.examDate))]
+      .sort((left, right) => left.localeCompare(right)),
+  }));
   const examVenueMetrics = selectedRequirement
     ? indexes.venueMetrics.get(venueProjectKey(selectedRequirement))
     : undefined;
@@ -255,6 +263,112 @@ export default function ApprovalsPage() {
     setRemarksByRecord(previous => ({ ...previous, [record.id]: '' }));
     setExceptionByRecord(previous => ({ ...previous, [record.id]: false }));
     setSelectedId('');
+    setSelectedIds(previous => previous.filter(id => id !== record.id));
+  };
+
+  const handleApproveSelected = () => {
+    if (!clientFilter || !examFilter) {
+      setAlert({ type: 'error', message: 'Select a client and exam before using bulk approval.' });
+      return;
+    }
+    if (selectedQueue.length === 0) {
+      setAlert({ type: 'error', message: 'Select at least one TC venue to approve.' });
+      return;
+    }
+
+    const approvalChecks = selectedQueue.map(record => {
+      const stage = record.approvalStage || 'surveillance_head';
+      const allowed = stage === 'surveillance_head'
+        ? can('approve_surveillance')
+        : can('approve_enablement');
+      const history = indexes.revisionsByRecord.get(record.id) || [];
+      const revision = history[history.length - 1];
+      const requirement = indexes.requirementsById.get(record.requirementId);
+      const flags = getCostFlags(
+        record,
+        history.length > 1 ? history[history.length - 2] : undefined,
+        indexes.candidatesByRecord.get(record.id) || 0,
+        requirement
+          ? (indexes.projectRecords.get(projectKey(requirement)) || []).filter(item => item.id !== record.id)
+          : []
+      );
+      const hasRemarks = Boolean((remarksByRecord[record.id] || '').trim());
+      const hasException = Boolean(exceptionByRecord[record.id]);
+      const reason = !allowed
+        ? 'You do not have permission for its approval stage'
+        : !revision
+          ? 'No saved quote revision is available'
+          : flags.length > 0 && (!hasRemarks || !hasException)
+            ? 'Cost alert requires remarks and exception approval'
+            : hasException && !hasRemarks
+              ? 'Exception approval requires remarks'
+              : '';
+      return { record, stage, revision, reason };
+    });
+    const skipped = approvalChecks.filter(item => item.reason);
+    const approved = approvalChecks.filter(item => !item.reason);
+
+    if (skipped.length > 0) {
+      const details = skipped.map(item => {
+        const requirement = indexes.requirementsById.get(item.record.requirementId);
+        return `${requirement?.tcCode || item.record.id}: ${item.reason}`;
+      }).join('\n');
+      const confirmed = window.confirm(
+        `${skipped.length} selected venue${skipped.length === 1 ? '' : 's'} will be skipped:\n${details}\n\nContinue approving the ${approved.length} eligible venue${approved.length === 1 ? '' : 's'}?`
+      );
+      if (!confirmed) return;
+    }
+
+    if (approved.length === 0) {
+      setSelectedIds([]);
+      setAlert({ type: 'error', message: 'No selected venues were approved. All selected venues were skipped.' });
+      return;
+    }
+
+    const events: ApprovalEvent[] = approved.map(({ record, stage, revision }) => ({
+      id: uuidv4(),
+      installationRecordId: record.id,
+      stage,
+      action: 'approved',
+      userId: currentUser!.id,
+      remarks: (remarksByRecord[record.id] || '').trim(),
+      exception: exceptionByRecord[record.id] || undefined,
+      quoteRevisionId: revision!.id,
+      createdAt: new Date().toISOString(),
+    }));
+    const eventsByRecord = new Map(events.map(event => [event.installationRecordId, event]));
+    updateData(previous => ({
+      ...previous,
+      installations: previous.installations.map(record => {
+        const event = eventsByRecord.get(record.id);
+        if (!event) return record;
+        const nextStage = event.stage === 'surveillance_head' ? 'enablement_head' : undefined;
+        return {
+          ...record,
+          approvalStatus: nextStage ? 'pending' : 'approved',
+          approvalStage: nextStage,
+          updatedAt: event.createdAt,
+        };
+      }),
+      approvalEvents: [...previous.approvalEvents, ...events],
+    }));
+    events.forEach(event => addAuditLog('UPDATE', 'InstallationApproval', event.installationRecordId, undefined, event));
+    setRemarksByRecord(previous => {
+      const next = { ...previous };
+      events.forEach(event => { delete next[event.installationRecordId]; });
+      return next;
+    });
+    setExceptionByRecord(previous => {
+      const next = { ...previous };
+      events.forEach(event => { delete next[event.installationRecordId]; });
+      return next;
+    });
+    setSelectedIds([]);
+    setSelectedId('');
+    setAlert({
+      type: 'success',
+      message: `${events.length} venue${events.length === 1 ? '' : 's'} approved${skipped.length > 0 ? `; ${skipped.length} skipped` : ''}.`,
+    });
   };
 
   const openQuotation = (fileId?: string) => {
@@ -294,8 +408,6 @@ export default function ApprovalsPage() {
         : []
     )
     : [];
-  const displayedScheduleCostIds = new Set<string>();
-
   return (
     <div className="space-y-5">
       <header>
@@ -319,14 +431,20 @@ export default function ApprovalsPage() {
               setClientFilter(event.target.value);
               setExamFilter('');
               setSelectedId('');
+              setSelectedIds([]);
+              setPage(1);
             }} options={clientOptions.map(client => ({ value: client, label: client }))} placeholder="Select client" />
             <Select label="Exam Name" value={examFilter} onChange={event => {
               setExamFilter(event.target.value);
               setSelectedId('');
+              setSelectedIds([]);
+              setPage(1);
             }} options={examOptions.map(exam => ({ value: exam, label: exam }))} placeholder="Select exam" disabled={!clientFilter} />
             <Input label="TC Code" value={tcCodeFilter} onChange={event => {
               setTcCodeFilter(event.target.value.replace(/\D/g, ''));
               setSelectedId('');
+              setSelectedIds([]);
+              setPage(1);
             }} inputMode="numeric" pattern="[0-9]*" placeholder="Numbers only" />
           </section>
 
@@ -337,23 +455,43 @@ export default function ApprovalsPage() {
                 <p className="text-xs text-slate-500">
                   {clientFilter && examFilter ? `${clientFilter} · ${examFilter} · ` : ''}
                   {filteredQueue.length} venue quote{filteredQueue.length === 1 ? '' : 's'} waiting at your approval level
-                  {clientFilter && examFilter && selectedRequirement
-                    ? ` · ${temporaryCctvDays} temporary CCTV days at TC Code ${selectedRequirement.tcCode}`
-                    : ''}
                 </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedIds.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={() => setSelectedIds([])}>
+                    Clear selection ({selectedIds.length})
+                  </Button>
+                )}
+                <Button size="sm" disabled={!clientFilter || !examFilter || selectedQueue.length === 0}
+                  onClick={handleApproveSelected}>
+                  <Check size={14} /> Approve selected ({selectedQueue.length})
+                </Button>
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <table className="w-full min-w-[1120px] table-fixed text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
                   <tr>
-                    {['Zone', 'State', 'City', 'TC Code', 'TC Name', 'Vendor Name', 'Cost for approval', 'Temporary CCTV days', 'Cost history', 'Cost alert', 'Approval remarks', 'Decision'].map(label =>
-                      <th key={label} className="whitespace-nowrap px-3 py-3">{label}</th>
-                    )}
+                    <th className="w-12 px-3 py-3">
+                      <input aria-label="Select all matching TC venues" type="checkbox"
+                        checked={allFilteredSelected}
+                        disabled={!clientFilter || !examFilter || filteredQueue.length === 0}
+                        onChange={event => setSelectedIds(event.target.checked
+                          ? filteredQueue.map(record => record.id)
+                          : [])}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                    </th>
+                    <th className="w-[22%] whitespace-normal px-3 py-3">TC venue</th>
+                    <th className="w-[13%] whitespace-normal px-3 py-3">Approval quote &amp; use</th>
+                    <th className="w-[12%] whitespace-normal px-3 py-3">Cost history</th>
+                    <th className="w-[10%] whitespace-normal px-3 py-3">Cost review</th>
+                    <th className="w-[23%] whitespace-normal px-3 py-3">Approver remarks</th>
+                    <th className="w-[13%] whitespace-normal px-3 py-3">Decision</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredQueue.map(record => {
+                  {pageQueue.map(record => {
                     const requirement = indexes.requirementsById.get(record.requirementId);
                     if (!requirement) return null;
                     const vendorName = indexes.vendorsById.get(record.vendorId)?.vendorName || 'Vendor unavailable';
@@ -372,39 +510,64 @@ export default function ApprovalsPage() {
                     const canApprove = (record.approvalStage || 'surveillance_head') === 'surveillance_head'
                       ? can('approve_surveillance')
                       : can('approve_enablement');
+                    const isSelected = selectedIds.includes(record.id);
                     return (
-                      <tr key={record.id} className={`border-t border-slate-100 ${active ? 'bg-blue-50/60' : ''}`}>
-                        <td className="whitespace-nowrap px-3 py-3">{requirement.zone}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{requirement.state}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{requirement.city}</td>
-                        <td className="whitespace-nowrap px-3 py-3">
+                      <tr key={record.id} className={`border-t border-slate-100 align-top transition-colors hover:bg-slate-50/80 ${active ? 'bg-blue-50/50' : ''} ${isSelected ? 'bg-blue-50/70' : ''}`}>
+                        <td className="px-3 py-4">
+                          <input aria-label={`Select TC Code ${requirement.tcCode}`} type="checkbox"
+                            checked={isSelected}
+                            disabled={!clientFilter || !examFilter}
+                            onChange={event => setSelectedIds(previous => event.target.checked
+                              ? [...new Set([...previous, record.id])]
+                              : previous.filter(id => id !== record.id))}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        </td>
+                        <td className="whitespace-normal px-3 py-4">
                           <button type="button" onClick={() => {
                             setSelectedId(record.id);
                             setAlert(null);
-                          }} className="font-mono font-semibold text-blue-700 hover:underline">
-                            {requirement.tcCode}
+                          }} className="font-mono text-xs font-bold text-blue-700 hover:underline">
+                            TC {requirement.tcCode}
                           </button>
-                          <p className="text-xs text-slate-500">{stageTitle[record.approvalStage || 'surveillance_head']}</p>
+                          <p className="mt-1 break-words font-semibold leading-snug text-slate-900">{requirement.tcName}</p>
+                          <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                            {requirement.zone} · {requirement.state} · {requirement.city}
+                          </p>
+                          <p className="text-xs leading-relaxed text-slate-500">
+                            {requirement.clientName} · {requirement.examName}
+                          </p>
+                          <p className="mt-1 text-xs font-medium text-slate-700">{vendorName}</p>
+                          <span className="mt-2 inline-flex rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
+                            {stageTitle[record.approvalStage || 'surveillance_head']}
+                          </span>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 font-medium">{requirement.tcName}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{vendorName}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold">{money(record.localVendorCost)}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{days}</td>
-                        <td className="whitespace-nowrap px-3 py-3">
+                        <td className="whitespace-normal px-3 py-4">
+                          <p className="font-semibold tabular-nums text-slate-900">{money(record.localVendorCost)}</p>
+                          <p className="mt-1 text-xs text-slate-500">Installation quote</p>
+                          <p className="mt-3 font-medium text-slate-800">{days} {days === 1 ? 'day' : 'days'}</p>
+                          <p className="text-xs text-slate-500">Temporary CCTV</p>
+                        </td>
+                        <td className="whitespace-normal px-3 py-4">
                           <Button variant="outline" size="sm" onClick={() => setDetailRecordId(record.id)}>
-                            <History size={13} /> Past costs
+                            <History size={13} /> View history
                           </Button>
+                          {recordPreviousRevision && (
+                            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                              Previous quote: {money(recordPreviousRevision.localVendorCost)}
+                            </p>
+                          )}
                         </td>
-                        <td className="px-3 py-3">
+                        <td className="whitespace-normal px-3 py-4">
                           {flags.length > 0 && (
                             <button type="button" onClick={() => setAlertRecordId(record.id)}
-                              className="inline-flex animate-pulse items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-200"
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
                               aria-label={`Cost alert details for TC Code ${requirement.tcCode}`}>
                               <AlertCircle size={13} /> Review
                             </button>
                           )}
+                          {flags.length === 0 && <span className="text-xs text-emerald-700">No alert</span>}
                         </td>
-                        <td className="min-w-56 px-3 py-3">
+                        <td className="whitespace-normal px-3 py-4">
                           <Textarea
                             label={`Approval remarks for TC Code ${requirement.tcCode}`}
                             value={remarksByRecord[record.id] || ''}
@@ -412,7 +575,8 @@ export default function ApprovalsPage() {
                               ...previous,
                               [record.id]: event.target.value,
                             }))}
-                            rows={2}
+                            rows={3}
+                            className="w-full min-w-0 max-w-full resize-y text-sm"
                             placeholder={flags.length > 0
                               ? 'Required: explain this cost alert before approving'
                               : 'Optional approval note; required for send-back'}
@@ -429,13 +593,13 @@ export default function ApprovalsPage() {
                             </label>
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3">
-                          <div className="flex flex-col gap-2">
-                            <Button variant="outline" size="sm" disabled={!canApprove}
+                        <td className="whitespace-normal px-3 py-4">
+                          <div className="flex flex-col items-stretch gap-2">
+                            <Button variant="outline" size="sm" className="whitespace-normal" disabled={!canApprove}
                               onClick={() => handleDecision(record, 'sent_back')}>
                               <CornerUpLeft size={13} /> Send back
                             </Button>
-                            <Button size="sm" disabled={!canApprove}
+                            <Button size="sm" className="whitespace-normal" disabled={!canApprove}
                               onClick={() => handleDecision(record, 'approved')}>
                               <Check size={13} /> {record.approvalStage === 'enablement_head' ? 'Approve final' : 'Approve'}
                             </Button>
@@ -444,12 +608,22 @@ export default function ApprovalsPage() {
                       </tr>
                     );
                   })}
-                  {filteredQueue.length === 0 && (
-                    <tr><td colSpan={12} className="px-4 py-10 text-center text-sm text-slate-500">No TC venues match the selected client, exam, or code.</td></tr>
+                  {pageQueue.length === 0 && (
+                    <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">No TC venues match the selected client, exam, or code.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
+            <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={filteredQueue.length}
+              onPageChange={nextPage => {
+                setPage(nextPage);
+                setSelectedId('');
+              }} />
+            {!clientFilter || !examFilter ? (
+              <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+                Select a client and exam to select venues for bulk approval.
+              </p>
+            ) : null}
           </section>
 
           {selectedRecord && selectedRequirement && (
@@ -485,30 +659,28 @@ export default function ApprovalsPage() {
                 <div className="mt-2 overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                      <tr>{['Client', 'Exam', 'Exam date', 'Candidates', 'Vendor', 'Installation quote'].map(label =>
-                        <th key={label} className="whitespace-nowrap px-3 py-2">{label}</th>
+                      <tr>{['Client', 'Exam', 'Exam dates', 'Candidates', 'Vendor', 'Installation quote'].map(label =>
+                        <th key={label} className="whitespace-normal px-3 py-2">{label}</th>
                       )}</tr>
                     </thead>
                     <tbody>
-                      {venueSchedule.slice().sort((left, right) =>
-                        (normalizeExamDate(left.schedule?.examDate || '') || left.schedule?.examDate || '')
-                          .localeCompare(normalizeExamDate(right.schedule?.examDate || '') || right.schedule?.examDate || '')
-                      ).map(schedule => {
+                      {venueSchedule.map(schedule => {
+                        const scheduleRows = indexes.schedulesByRecord.get(schedule.record.id) || [];
                         const scheduleVendor = indexes.vendorsById.get(schedule.record.vendorId);
-                        const showCost = !displayedScheduleCostIds.has(schedule.record.id);
-                        displayedScheduleCostIds.add(schedule.record.id);
                         return (
-                          <tr key={schedule.schedule?.id || schedule.record.id} className="border-t border-slate-100">
-                            <td className="whitespace-nowrap px-3 py-2">{selectedRequirement.clientName}</td>
-                            <td className="whitespace-nowrap px-3 py-2">{selectedRequirement.examName}</td>
-                            <td className="whitespace-nowrap px-3 py-2">{schedule.schedule ? dateLabel(schedule.schedule.examDate) : 'Not recorded'}</td>
-                            <td className="whitespace-nowrap px-3 py-2">
-                              {schedule.schedule
-                                ? schedule.schedule.scheduledCandidates.toLocaleString('en-IN')
-                                : (indexes.candidatesByRecord.get(schedule.record.id) || 0).toLocaleString('en-IN')}
+                          <tr key={schedule.record.id} className="border-t border-slate-100">
+                            <td className="px-3 py-2">{schedule.requirement.clientName}</td>
+                            <td className="px-3 py-2">{schedule.requirement.examName}</td>
+                            <td className="whitespace-normal px-3 py-2 leading-relaxed">
+                              {schedule.dates.length > 0 ? schedule.dates.map(formatExamDate).join(', ') : 'Not recorded'}
+                            </td>
+                            <td className="px-3 py-2">
+                              {(scheduleRows.length > 0
+                                ? scheduleRows.reduce((total, row) => total + row.scheduledCandidates, 0)
+                                : indexes.candidatesByRecord.get(schedule.record.id) || 0).toLocaleString('en-IN')}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2">{scheduleVendor?.vendorName || 'Unavailable'}</td>
-                            <td className="whitespace-nowrap px-3 py-2">{showCost ? money(schedule.record.localVendorCost) : '—'}</td>
+                            <td className="whitespace-nowrap px-3 py-2 font-medium">{money(schedule.record.localVendorCost)}</td>
                           </tr>
                         );
                       })}
@@ -565,6 +737,21 @@ export default function ApprovalsPage() {
           }).sort((left, right) => left.record.createdAt.localeCompare(right.record.createdAt));
           const recordIds = new Set(records.map(item => item.record.id));
           const schedule = data.examDates.filter(item => recordIds.has(item.installationRecordId));
+          const scheduleByInstallation = new Map<string, typeof schedule>();
+          schedule.forEach(item => {
+            const history = scheduleByInstallation.get(item.installationRecordId) || [];
+            history.push(item);
+            scheduleByInstallation.set(item.installationRecordId, history);
+          });
+          const historySchedule = records.map(item => {
+            const dates = scheduleByInstallation.get(item.record.id) || [];
+            return {
+              ...item,
+              dates: [...new Set(dates.map(row => normalizeExamDate(row.examDate) || row.examDate))]
+                .sort((left, right) => left.localeCompare(right)),
+              candidates: dates.reduce((total, row) => total + row.scheduledCandidates, 0),
+            };
+          });
           const totalCost = records.reduce((total, item) => total + item.record.localVendorCost, 0);
           const totalCandidates = records.reduce((total, item) =>
             total + (indexes.candidatesByRecord.get(item.record.id) || 0), 0);
@@ -578,7 +765,6 @@ export default function ApprovalsPage() {
                 total + (indexes.candidatesByRecord.get(item.record.id) || 0), 0),
             };
           });
-          const displayedHistoryCostIds = new Set<string>();
           return (
             <div className="max-h-[75vh] space-y-5 overflow-y-auto pr-1">
               <div className="grid gap-3 sm:grid-cols-3">
@@ -611,25 +797,22 @@ export default function ApprovalsPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                      <tr>{['Client', 'Exam', 'Exam date', 'Candidates', 'Vendor', 'Installation quote'].map(label =>
-                        <th key={label} className="whitespace-nowrap px-3 py-2">{label}</th>
+                      <tr>{['Client', 'Exam', 'Exam dates', 'Candidates', 'Vendor', 'Installation quote'].map(label =>
+                        <th key={label} className="whitespace-normal px-3 py-2">{label}</th>
                       )}</tr>
                     </thead>
-                    <tbody>{schedule.slice().sort((left, right) =>
-                      (normalizeExamDate(left.examDate) || left.examDate).localeCompare(normalizeExamDate(right.examDate) || right.examDate)
-                    ).map(item => {
-                      const record = records.find(entry => entry.record.id === item.installationRecordId);
-                      if (!record) return null;
-                      const showCost = !displayedHistoryCostIds.has(record.record.id);
-                      displayedHistoryCostIds.add(record.record.id);
+                    <tbody>{historySchedule.map(item => {
+                      const scheduleVendor = indexes.vendorsById.get(item.record.vendorId);
                       return (
-                        <tr key={item.id} className="border-t border-slate-100">
-                          <td className="whitespace-nowrap px-3 py-2">{record.requirement.clientName}</td>
-                          <td className="whitespace-nowrap px-3 py-2">{record.requirement.examName}</td>
-                          <td className="whitespace-nowrap px-3 py-2">{dateLabel(item.examDate)}</td>
-                          <td className="whitespace-nowrap px-3 py-2">{item.scheduledCandidates.toLocaleString('en-IN')}</td>
-                          <td className="whitespace-nowrap px-3 py-2">{data.vendors.find(vendor => vendor.id === record.record.vendorId)?.vendorName || 'Unavailable'}</td>
-                          <td className="whitespace-nowrap px-3 py-2">{showCost ? money(record.record.localVendorCost) : '—'}</td>
+                        <tr key={item.record.id} className="border-t border-slate-100">
+                          <td className="px-3 py-2">{item.requirement.clientName}</td>
+                          <td className="px-3 py-2">{item.requirement.examName}</td>
+                          <td className="whitespace-normal px-3 py-2 leading-relaxed">
+                            {item.dates.length > 0 ? item.dates.map(formatExamDate).join(', ') : 'Not recorded'}
+                          </td>
+                          <td className="px-3 py-2">{item.candidates.toLocaleString('en-IN')}</td>
+                          <td className="px-3 py-2">{scheduleVendor?.vendorName || 'Unavailable'}</td>
+                          <td className="whitespace-nowrap px-3 py-2 font-medium">{money(item.record.localVendorCost)}</td>
                         </tr>
                       );
                     })}</tbody>
