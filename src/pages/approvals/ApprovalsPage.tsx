@@ -15,36 +15,29 @@ const stageTitle: Record<ApprovalStage, string> = {
 
 const money = (amount: number) => `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const dateLabel = (date: string) => {
-  const value = new Date(date);
+  const normalized = normalizeExamDate(date);
+  const value = normalized
+    ? new Date(`${normalized}T00:00:00`)
+    : new Date(date);
   return Number.isNaN(value.getTime())
     ? date
     : value.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-function getRevisions(revisions: QuoteRevision[], recordId: string) {
-  return revisions
-    .filter(revision => revision.installationRecordId === recordId)
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+function venueKey(requirement: { zone: string; state: string; city: string; tcCode: string }) {
+  return [requirement.zone, requirement.state, requirement.city, requirement.tcCode]
+    .map(value => value.trim().toLocaleLowerCase()).join('\u0000');
 }
 
-function getCandidates(record: InstallationRecord, revisions: QuoteRevision[], examDates: Array<{
-  installationRecordId: string;
-  scheduledCandidates: number;
-}>) {
-  const recordRevisions = getRevisions(revisions, record.id);
-  const latestRevision = recordRevisions[recordRevisions.length - 1];
-  return latestRevision?.totalCandidates ??
-    examDates.filter(date => date.installationRecordId === record.id)
-      .reduce((total, date) => total + date.scheduledCandidates, 0);
+function projectKey(requirement: { clientName: string; examName: string }) {
+  return [requirement.clientName, requirement.examName]
+    .map(value => value.trim().toLocaleLowerCase()).join('\u0000');
 }
 
-function sameVenue(
-  left: { zone: string; state: string; city: string; tcCode: string },
-  right: { zone: string; state: string; city: string; tcCode: string }
-) {
-  return [left.zone, left.state, left.city, left.tcCode]
-    .every((value, index) => value.trim().toLocaleLowerCase() ===
-      [right.zone, right.state, right.city, right.tcCode][index].trim().toLocaleLowerCase());
+function venueProjectKey(requirement: {
+  zone: string; state: string; city: string; tcCode: string; clientName: string; examName: string;
+}) {
+  return `${venueKey(requirement)}\u0000${projectKey(requirement)}`;
 }
 
 export default function ApprovalsPage() {
@@ -53,12 +46,62 @@ export default function ApprovalsPage() {
   const [examFilter, setExamFilter] = useState('');
   const [tcCodeFilter, setTcCodeFilter] = useState('');
   const [selectedId, setSelectedId] = useState('');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [remarksByRecord, setRemarksByRecord] = useState<Record<string, string>>({});
-  const [exceptionApproval, setExceptionApproval] = useState(false);
+  const [exceptionByRecord, setExceptionByRecord] = useState<Record<string, boolean>>({});
   const [detailRecordId, setDetailRecordId] = useState('');
   const [alertRecordId, setAlertRecordId] = useState('');
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const indexes = useMemo(() => {
+    const requirementsById = new Map(data.requirements.map(requirement => [requirement.id, requirement]));
+    const vendorsById = new Map(data.vendors.map(vendor => [vendor.id, vendor]));
+    const revisionsByRecord = new Map<string, QuoteRevision[]>();
+    data.quoteRevisions.forEach(revision => {
+      const history = revisionsByRecord.get(revision.installationRecordId) || [];
+      history.push(revision);
+      revisionsByRecord.set(revision.installationRecordId, history);
+    });
+    revisionsByRecord.forEach(history => history.sort((left, right) => left.createdAt.localeCompare(right.createdAt)));
+    const schedulesByRecord = new Map<string, typeof data.examDates>();
+    data.examDates.forEach(schedule => {
+      const dates = schedulesByRecord.get(schedule.installationRecordId) || [];
+      dates.push(schedule);
+      schedulesByRecord.set(schedule.installationRecordId, dates);
+    });
+    const installationsById = new Map(data.installations.map(record => [record.id, record]));
+    const candidatesByRecord = new Map<string, number>();
+    data.installations.forEach(record => {
+      const history = revisionsByRecord.get(record.id) || [];
+      const latestRevision = history[history.length - 1];
+      candidatesByRecord.set(record.id, latestRevision?.totalCandidates ??
+        (schedulesByRecord.get(record.id) || []).reduce((total, schedule) => total + schedule.scheduledCandidates, 0));
+    });
+    const venueMetrics = new Map<string, { cost: number; candidates: number; days: Set<string> }>();
+    const projectRecords = new Map<string, Array<{ id: string; cost: number; candidates: number; perCandidate: number }>>();
+    data.installations.forEach(record => {
+      const requirement = requirementsById.get(record.requirementId);
+      if (!requirement) return;
+      const scope = venueProjectKey(requirement);
+      const metrics = venueMetrics.get(scope) || { cost: 0, candidates: 0, days: new Set<string>() };
+      metrics.cost += record.localVendorCost;
+      metrics.candidates += candidatesByRecord.get(record.id) || 0;
+      venueMetrics.set(scope, metrics);
+      const key = projectKey(requirement);
+      const candidates = candidatesByRecord.get(record.id) || 0;
+      if (candidates > 0) {
+        const peers = projectRecords.get(key) || [];
+        peers.push({ id: record.id, cost: record.localVendorCost, candidates, perCandidate: record.localVendorCost / candidates });
+        projectRecords.set(key, peers);
+      }
+    });
+    data.examDates.forEach(schedule => {
+      const record = installationsById.get(schedule.installationRecordId);
+      const requirement = record && requirementsById.get(record.requirementId);
+      if (!requirement) return;
+      venueMetrics.get(venueProjectKey(requirement))?.days.add(normalizeExamDate(schedule.examDate) || schedule.examDate);
+    });
+    return { requirementsById, vendorsById, revisionsByRecord, schedulesByRecord, candidatesByRecord, venueMetrics, projectRecords, installationsById };
+  }, [data]);
 
   const allowedStages: ApprovalStage[] = [
     ...(can('approve_surveillance') ? ['surveillance_head' as const] : []),
@@ -73,229 +116,145 @@ export default function ApprovalsPage() {
     .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
 
   const clientOptions = [...new Set(queue.flatMap(record => {
-    const requirement = data.requirements.find(item => item.id === record.requirementId);
+    const requirement = indexes.requirementsById.get(record.requirementId);
     return requirement ? [requirement.clientName] : [];
   }))].sort();
   const examOptions = [...new Set(queue.flatMap(record => {
-    const requirement = data.requirements.find(item => item.id === record.requirementId);
+    const requirement = indexes.requirementsById.get(record.requirementId);
     return requirement && (!clientFilter || requirement.clientName === clientFilter)
       ? [requirement.examName]
       : [];
   }))].sort();
   const filteredQueue = queue.filter(record => {
-    const requirement = data.requirements.find(item => item.id === record.requirementId);
+    const requirement = indexes.requirementsById.get(record.requirementId);
     return (!clientFilter || requirement?.clientName === clientFilter) &&
       (!examFilter || requirement?.examName === examFilter) &&
       (!tcCodeFilter || requirement?.tcCode.replace(/\D/g, '').includes(tcCodeFilter));
   });
   const selectedRecord = filteredQueue.find(record => record.id === selectedId) || filteredQueue[0];
   const selectedRequirement = selectedRecord
-    ? data.requirements.find(item => item.id === selectedRecord.requirementId)
+    ? indexes.requirementsById.get(selectedRecord.requirementId)
     : undefined;
   const selectedStage = selectedRecord?.approvalStage || 'surveillance_head';
   const selectedVendor = selectedRecord
-    ? data.vendors.find(item => item.id === selectedRecord.vendorId)
+    ? indexes.vendorsById.get(selectedRecord.vendorId)
     : undefined;
-  const selectedRevisionHistory = selectedRecord
-    ? getRevisions(data.quoteRevisions, selectedRecord.id)
-    : [];
-  const previousRevision = selectedRevisionHistory.length > 1
-    ? selectedRevisionHistory[selectedRevisionHistory.length - 2]
-    : undefined;
-  const selectedCandidates = selectedRecord
-    ? getCandidates(selectedRecord, data.quoteRevisions, data.examDates)
-    : 0;
-  const selectedPerCandidate = selectedRecord && selectedCandidates > 0
-    ? selectedRecord.localVendorCost / selectedCandidates
-    : 0;
   const venueRecords = useMemo(() => {
     if (!selectedRequirement) return [];
     return data.installations.flatMap(record => {
-      const requirement = data.requirements.find(item => item.id === record.requirementId);
-      return requirement && sameVenue(requirement, selectedRequirement)
+      const requirement = indexes.requirementsById.get(record.requirementId);
+      return requirement && venueKey(requirement) === venueKey(selectedRequirement)
         ? [{ record, requirement }]
         : [];
     }).sort((left, right) =>
       left.requirement.examName.localeCompare(right.requirement.examName) ||
       left.record.createdAt.localeCompare(right.record.createdAt)
     );
-  }, [data.installations, data.requirements, selectedRequirement]);
-  const venueRecordIds = new Set(venueRecords.map(item => item.record.id));
-  const venueSchedule = data.examDates.filter(item => venueRecordIds.has(item.installationRecordId));
-  const totalVenueCost = venueRecords.reduce((total, item) => total + item.record.localVendorCost, 0);
-  const totalVenueCandidates = venueRecords.reduce((total, item) =>
-    total + getCandidates(item.record, data.quoteRevisions, data.examDates), 0);
-  const temporaryCctvDays = new Set(venueSchedule.map(item =>
-    normalizeExamDate(item.examDate) || item.examDate
-  )).size;
+  }, [data.installations, indexes.requirementsById, selectedRequirement]);
+  const currentExamVenueRecords = selectedRequirement
+    ? venueRecords.filter(item =>
+      item.requirement.clientName === selectedRequirement.clientName &&
+      item.requirement.examName === selectedRequirement.examName)
+    : [];
+  const venueSchedule = currentExamVenueRecords.flatMap<{
+    record: InstallationRecord;
+    schedule: (typeof data.examDates)[number] | undefined;
+  }>(({ record }) => {
+    const schedules = indexes.schedulesByRecord.get(record.id) || [];
+    return schedules.length > 0
+      ? schedules.map(schedule => ({ record, schedule }))
+      : [{ record, schedule: undefined }];
+  });
+  const examVenueMetrics = selectedRequirement
+    ? indexes.venueMetrics.get(venueProjectKey(selectedRequirement))
+    : undefined;
+  const totalVenueCost = examVenueMetrics?.cost || 0;
+  const totalVenueCandidates = examVenueMetrics?.candidates || 0;
+  const temporaryCctvDays = examVenueMetrics?.days.size || 0;
   const totalCostPerCandidate = totalVenueCandidates > 0
     ? totalVenueCost / totalVenueCandidates
     : 0;
 
-  const projectRecords = selectedRecord && selectedRequirement
-    ? data.installations.flatMap(record => {
-        if (record.id === selectedRecord.id) return [];
-        const requirement = data.requirements.find(item => item.id === record.requirementId);
-        if (requirement?.clientName !== selectedRequirement.clientName ||
-          requirement.examName !== selectedRequirement.examName) return [];
-        const candidates = getCandidates(record, data.quoteRevisions, data.examDates);
-        return candidates > 0
-          ? [{ cost: record.localVendorCost, perCandidate: record.localVendorCost / candidates }]
-          : [];
-      })
-      : [];
-  const averageProjectPerCandidate = projectRecords.length > 0
-      ? projectRecords.reduce((total, item) => total + item.perCandidate, 0) / projectRecords.length
-      : 0;
-  const previousQuoteIncrease = selectedRecord && previousRevision && previousRevision.localVendorCost > 0
-    ? (selectedRecord.localVendorCost - previousRevision.localVendorCost) / previousRevision.localVendorCost
-    : undefined;
-  const costFlags = selectedRecord ? [
-    ...(previousQuoteIncrease !== undefined && previousQuoteIncrease > 0.2
-      ? [`Current quote increased ${Math.round(previousQuoteIncrease * 100)}% compared with its previous quote (${money(previousRevision!.localVendorCost)}).`]
-      : []),
-    ...(averageProjectPerCandidate > 0 && selectedPerCandidate > averageProjectPerCandidate * 1.25
-      ? [`Cost per candidate (${money(selectedPerCandidate)}) is more than 25% above the client/exam average (${money(averageProjectPerCandidate)}).`]
-      : []),
-    ...(projectRecords.length > 0 && selectedRecord.localVendorCost > Math.max(...projectRecords.map(item => item.cost))
-      ? [`Current total venue cost (${money(selectedRecord.localVendorCost)}) is higher than all other venues for this client/exam.`]
-      : []),
-    ...(projectRecords.length > 0 && selectedPerCandidate > Math.max(...projectRecords.map(item => item.perCandidate))
-      ? [`Current cost per candidate (${money(selectedPerCandidate)}) is higher than all other venues for this client/exam.`]
-      : []),
-  ] : [];
   const currentApprovalEvents = selectedRecord
     ? data.approvalEvents
       .filter(event => event.installationRecordId === selectedRecord.id)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
     : [];
 
-  const selectedVisibleIds = selectedIds.filter(id => filteredQueue.some(record => record.id === id));
-  const allVisibleSelected = filteredQueue.length > 0 &&
-    filteredQueue.every(record => selectedVisibleIds.includes(record.id));
-  const selectedApprovalRecords = filteredQueue.filter(record => selectedVisibleIds.includes(record.id));
-  const canSelectVenues = Boolean(clientFilter && examFilter);
-  const isAllowedToAct = selectedStage === 'surveillance_head'
-    ? can('approve_surveillance')
-    : can('approve_enablement');
-
-  const handleDecision = (action: 'approved' | 'sent_back') => {
-    if (!selectedRecord || !isAllowedToAct) return;
-    const note = (remarksByRecord[selectedRecord.id] || '').trim();
+  const handleDecision = (record: InstallationRecord, action: 'approved' | 'sent_back') => {
+    const requirement = indexes.requirementsById.get(record.requirementId);
+    const stage = record.approvalStage || 'surveillance_head';
+    const allowed = stage === 'surveillance_head' ? can('approve_surveillance') : can('approve_enablement');
+    if (!allowed) return;
+    const note = (remarksByRecord[record.id] || '').trim();
+    const recordRevisionHistory = indexes.revisionsByRecord.get(record.id) || [];
+    const recordPreviousRevision = recordRevisionHistory.length > 1
+      ? recordRevisionHistory[recordRevisionHistory.length - 2]
+      : undefined;
+    const recordCostFlags = getCostFlags(
+      record,
+      recordPreviousRevision,
+      indexes.candidatesByRecord.get(record.id) || 0,
+      requirement
+        ? (indexes.projectRecords.get(projectKey(requirement)) || []).filter(item => item.id !== record.id)
+        : []
+    );
     if (action === 'sent_back' && !note) {
       setAlert({ type: 'error', message: 'Remarks are mandatory when sending a quote back.' });
       return;
     }
-    if (action === 'approved' && (costFlags.length > 0 || exceptionApproval) && !note) {
+    if (action === 'approved' && ((recordCostFlags.length > 0 || exceptionByRecord[record.id]) && !note)) {
       setAlert({ type: 'error', message: 'Remarks are mandatory when approving a cost alert or exception.' });
       return;
     }
-    const revisions = getRevisions(data.quoteRevisions, selectedRecord.id);
-    const revision = revisions[revisions.length - 1];
+    if (action === 'approved' && recordCostFlags.length > 0 && !exceptionByRecord[record.id]) {
+      setAlert({ type: 'error', message: 'Cost alerts require an explicit exception approval.' });
+      return;
+    }
+    const revision = recordRevisionHistory[recordRevisionHistory.length - 1];
     if (!revision) {
       setAlert({ type: 'error', message: 'This quote has no saved revision snapshot and cannot be approved.' });
       return;
     }
     const event: ApprovalEvent = {
       id: uuidv4(),
-      installationRecordId: selectedRecord.id,
-      stage: selectedStage,
+      installationRecordId: record.id,
+      stage,
       action,
       userId: currentUser!.id,
       remarks: note,
-      exception: action === 'approved' ? exceptionApproval : undefined,
+      exception: action === 'approved' ? exceptionByRecord[record.id] : undefined,
       quoteRevisionId: revision.id,
       createdAt: new Date().toISOString(),
     };
-    const nextStage = selectedStage === 'surveillance_head' ? 'enablement_head' : undefined;
+    const nextStage = stage === 'surveillance_head' ? 'enablement_head' : undefined;
     const nextStatus: ApprovalStatus = action === 'sent_back'
       ? 'returned'
       : nextStage ? 'pending' : 'approved';
     updateData(previous => ({
       ...previous,
-      installations: previous.installations.map(record => record.id === selectedRecord.id
+      installations: previous.installations.map(item => item.id === record.id
         ? {
-            ...record,
+            ...item,
             approvalStatus: nextStatus,
-            approvalStage: action === 'sent_back' ? selectedStage : nextStage,
+            approvalStage: action === 'sent_back' ? stage : nextStage,
             updatedAt: event.createdAt,
           }
-        : record),
+        : item),
       approvalEvents: [...previous.approvalEvents, event],
     }));
-    addAuditLog('UPDATE', 'InstallationApproval', selectedRecord.id, undefined, event);
+    addAuditLog('UPDATE', 'InstallationApproval', record.id, undefined, event);
     setAlert({
       type: 'success',
       message: action === 'sent_back'
-        ? `Quote sent back to ${selectedRequirement?.zone || 'the zonal user'}.`
+        ? `Quote sent back to ${requirement?.zone || 'the zonal user'}.`
         : nextStage
-          ? `Approved by ${stageTitle[selectedStage]}; forwarded to ${stageTitle[nextStage]}.`
+          ? `Approved by ${stageTitle[stage]}; forwarded to ${stageTitle[nextStage]}.`
           : 'Quote approved by both levels.',
     });
-    setRemarksByRecord(previous => ({ ...previous, [selectedRecord.id]: '' }));
-    setExceptionApproval(false);
+    setRemarksByRecord(previous => ({ ...previous, [record.id]: '' }));
+    setExceptionByRecord(previous => ({ ...previous, [record.id]: false }));
     setSelectedId('');
-  };
-
-  const handleApproveSelected = () => {
-    if (selectedApprovalRecords.length === 0) return;
-    const firstMissingRevision = selectedApprovalRecords.find(record =>
-      !getRevisions(data.quoteRevisions, record.id).length
-    );
-    if (firstMissingRevision) {
-      setSelectedId(firstMissingRevision.id);
-      setAlert({ type: 'error', message: 'A selected quote has no revision snapshot. Review it individually before approval.' });
-      return;
-    }
-    const firstMissingRemark = selectedApprovalRecords.find(record => {
-      const requirement = data.requirements.find(item => item.id === record.requirementId);
-      const flags = getCostFlagsForRecord(record, requirement, data.installations, data.requirements, data.quoteRevisions, data.examDates);
-      return flags.length > 0 && !(remarksByRecord[record.id] || '').trim();
-    });
-    if (firstMissingRemark) {
-      setSelectedId(firstMissingRemark.id);
-      setAlert({ type: 'error', message: 'Enter approval remarks for each selected venue with a cost alert.' });
-      return;
-    }
-    const events: ApprovalEvent[] = selectedApprovalRecords.map(record => {
-      const stage = record.approvalStage || 'surveillance_head';
-      const revisions = getRevisions(data.quoteRevisions, record.id);
-      const revision = revisions[revisions.length - 1];
-      return {
-        id: uuidv4(),
-        installationRecordId: record.id,
-        stage,
-        action: 'approved',
-        userId: currentUser!.id,
-        remarks: (remarksByRecord[record.id] || '').trim(),
-        quoteRevisionId: revision.id,
-        createdAt: new Date().toISOString(),
-      };
-    });
-    updateData(previous => ({
-      ...previous,
-      installations: previous.installations.map(record => {
-        const event = events.find(item => item.installationRecordId === record.id);
-        if (!event) return record;
-        const nextStage = event.stage === 'surveillance_head' ? 'enablement_head' : undefined;
-        return {
-          ...record,
-          approvalStatus: nextStage ? 'pending' : 'approved',
-          approvalStage: nextStage,
-          updatedAt: event.createdAt,
-        };
-      }),
-      approvalEvents: [...previous.approvalEvents, ...events],
-    }));
-    events.forEach(event =>
-      addAuditLog('UPDATE', 'InstallationApproval', event.installationRecordId, undefined, event)
-    );
-    setSelectedIds([]);
-    setSelectedId('');
-    setAlert({
-      type: 'success',
-      message: `${events.length} selected ${events.length === 1 ? 'venue was' : 'venues were'} approved.`,
-    });
   };
 
   const openQuotation = (fileId?: string) => {
@@ -320,13 +279,20 @@ export default function ApprovalsPage() {
     ? data.requirements.find(requirement => requirement.id === detailsRecord.requirementId)
     : undefined;
   const alertRecord = alertRecordId
-    ? data.installations.find(record => record.id === alertRecordId)
+    ? indexes.installationsById.get(alertRecordId)
     : undefined;
   const alertRequirement = alertRecord
-    ? data.requirements.find(requirement => requirement.id === alertRecord.requirementId)
+    ? indexes.requirementsById.get(alertRecord.requirementId)
     : undefined;
   const alertFlags = alertRecord
-    ? getCostFlagsForRecord(alertRecord, alertRequirement, data.installations, data.requirements, data.quoteRevisions, data.examDates)
+    ? getCostFlags(
+      alertRecord,
+      (indexes.revisionsByRecord.get(alertRecord.id) || []).slice(-2, -1)[0],
+      indexes.candidatesByRecord.get(alertRecord.id) || 0,
+      alertRequirement
+        ? (indexes.projectRecords.get(projectKey(alertRequirement)) || []).filter(item => item.id !== alertRecord.id)
+        : []
+    )
     : [];
   const displayedScheduleCostIds = new Set<string>();
 
@@ -353,16 +319,14 @@ export default function ApprovalsPage() {
               setClientFilter(event.target.value);
               setExamFilter('');
               setSelectedId('');
-              setSelectedIds([]);
             }} options={clientOptions.map(client => ({ value: client, label: client }))} placeholder="Select client" />
             <Select label="Exam Name" value={examFilter} onChange={event => {
               setExamFilter(event.target.value);
               setSelectedId('');
-              setSelectedIds([]);
             }} options={examOptions.map(exam => ({ value: exam, label: exam }))} placeholder="Select exam" disabled={!clientFilter} />
             <Input label="TC Code" value={tcCodeFilter} onChange={event => {
               setTcCodeFilter(event.target.value.replace(/\D/g, ''));
-              setSelectedIds([]);
+              setSelectedId('');
             }} inputMode="numeric" pattern="[0-9]*" placeholder="Numbers only" />
           </section>
 
@@ -370,72 +334,59 @@ export default function ApprovalsPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
               <div>
                 <h2 className="font-semibold text-slate-900">TC venue details for approval</h2>
-                <p className="text-xs text-slate-500">{filteredQueue.length} venue quote{filteredQueue.length === 1 ? '' : 's'} waiting at your approval level</p>
+                <p className="text-xs text-slate-500">
+                  {clientFilter && examFilter ? `${clientFilter} · ${examFilter} · ` : ''}
+                  {filteredQueue.length} venue quote{filteredQueue.length === 1 ? '' : 's'} waiting at your approval level
+                  {clientFilter && examFilter && selectedRequirement
+                    ? ` · ${temporaryCctvDays} temporary CCTV days at TC Code ${selectedRequirement.tcCode}`
+                    : ''}
+                </p>
               </div>
-              {selectedVisibleIds.length > 0 && (
-                <Button onClick={handleApproveSelected} disabled={selectedApprovalRecords.some(record =>
-                  !can(record.approvalStage === 'enablement_head' ? 'approve_enablement' : 'approve_surveillance')
-                )}>
-                  <Check size={14} /> Approve selected ({selectedVisibleIds.length})
-                </Button>
-              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-3 py-3">
-                      <input aria-label="Select all matching venues" type="checkbox"
-                        checked={allVisibleSelected} disabled={!canSelectVenues}
-                        onChange={event => setSelectedIds(event.target.checked
-                          ? filteredQueue.map(record => record.id)
-                          : [])}
-                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                    </th>
-                    {['Zone', 'State', 'City', 'TC Code', 'Vendor Name', 'Cost for approval', 'Temporary CCTV days', 'Cost history'].map(label =>
+                    {['Zone', 'State', 'City', 'TC Code', 'TC Name', 'Vendor Name', 'Cost for approval', 'Temporary CCTV days', 'Cost history', 'Cost alert', 'Approval remarks', 'Decision'].map(label =>
                       <th key={label} className="whitespace-nowrap px-3 py-3">{label}</th>
                     )}
-                    <th className="px-3 py-3">Alert</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredQueue.map(record => {
-                    const requirement = data.requirements.find(item => item.id === record.requirementId);
+                    const requirement = indexes.requirementsById.get(record.requirementId);
                     if (!requirement) return null;
-                    const vendorName = data.vendors.find(item => item.id === record.vendorId)?.vendorName || 'Vendor unavailable';
+                    const vendorName = indexes.vendorsById.get(record.vendorId)?.vendorName || 'Vendor unavailable';
                     const active = record.id === (selectedRecord?.id || selectedId);
-                    const flags = getCostFlagsForRecord(record, requirement, data.installations, data.requirements, data.quoteRevisions, data.examDates);
-                    const recordVenueEntries = data.installations.filter(item => {
-                      const itemRequirement = data.requirements.find(row => row.id === item.requirementId);
-                      return itemRequirement && sameVenue(itemRequirement, requirement);
-                    });
-                    const dates = data.examDates.filter(item =>
-                      recordVenueEntries.some(entry => entry.id === item.installationRecordId)
+                    const recordRevisionHistory = indexes.revisionsByRecord.get(record.id) || [];
+                    const recordPreviousRevision = recordRevisionHistory.length > 1
+                      ? recordRevisionHistory[recordRevisionHistory.length - 2]
+                      : undefined;
+                    const flags = getCostFlags(
+                      record,
+                      recordPreviousRevision,
+                      indexes.candidatesByRecord.get(record.id) || 0,
+                      (indexes.projectRecords.get(projectKey(requirement)) || []).filter(item => item.id !== record.id)
                     );
-                    const days = new Set(dates.map(item => normalizeExamDate(item.examDate) || item.examDate)).size;
+                    const days = indexes.venueMetrics.get(venueProjectKey(requirement))?.days.size || 0;
+                    const canApprove = (record.approvalStage || 'surveillance_head') === 'surveillance_head'
+                      ? can('approve_surveillance')
+                      : can('approve_enablement');
                     return (
                       <tr key={record.id} className={`border-t border-slate-100 ${active ? 'bg-blue-50/60' : ''}`}>
-                        <td className="px-3 py-3">
-                          <input aria-label={`Select TC Code ${requirement.tcCode}`} type="checkbox"
-                            checked={selectedVisibleIds.includes(record.id)} disabled={!canSelectVenues}
-                            onChange={event => setSelectedIds(previous => event.target.checked
-                              ? [...new Set([...previous, record.id])]
-                              : previous.filter(id => id !== record.id))}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                        </td>
                         <td className="whitespace-nowrap px-3 py-3">{requirement.zone}</td>
                         <td className="whitespace-nowrap px-3 py-3">{requirement.state}</td>
                         <td className="whitespace-nowrap px-3 py-3">{requirement.city}</td>
                         <td className="whitespace-nowrap px-3 py-3">
                           <button type="button" onClick={() => {
                             setSelectedId(record.id);
-                            setExceptionApproval(false);
                             setAlert(null);
                           }} className="font-mono font-semibold text-blue-700 hover:underline">
                             {requirement.tcCode}
                           </button>
                           <p className="text-xs text-slate-500">{stageTitle[record.approvalStage || 'surveillance_head']}</p>
                         </td>
+                        <td className="whitespace-nowrap px-3 py-3 font-medium">{requirement.tcName}</td>
                         <td className="whitespace-nowrap px-3 py-3">{vendorName}</td>
                         <td className="whitespace-nowrap px-3 py-3 font-semibold">{money(record.localVendorCost)}</td>
                         <td className="whitespace-nowrap px-3 py-3">{days}</td>
@@ -453,20 +404,56 @@ export default function ApprovalsPage() {
                             </button>
                           )}
                         </td>
+                        <td className="min-w-56 px-3 py-3">
+                          <Textarea
+                            label={`Approval remarks for TC Code ${requirement.tcCode}`}
+                            value={remarksByRecord[record.id] || ''}
+                            onChange={event => setRemarksByRecord(previous => ({
+                              ...previous,
+                              [record.id]: event.target.value,
+                            }))}
+                            rows={2}
+                            placeholder={flags.length > 0
+                              ? 'Required: explain this cost alert before approving'
+                              : 'Optional approval note; required for send-back'}
+                          />
+                          {flags.length > 0 && (
+                            <label className="mt-2 flex items-center gap-2 text-xs text-amber-900">
+                              <input type="checkbox" checked={Boolean(exceptionByRecord[record.id])}
+                                onChange={event => setExceptionByRecord(previous => ({
+                                  ...previous,
+                                  [record.id]: event.target.checked,
+                                }))}
+                                className="rounded border-amber-400 text-amber-600 focus:ring-amber-500" />
+                              Exception approval{flags.length > 0 ? ' (required for cost alerts)' : ''}
+                            </label>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3">
+                          <div className="flex flex-col gap-2">
+                            <Button variant="outline" size="sm" disabled={!canApprove}
+                              onClick={() => handleDecision(record, 'sent_back')}>
+                              <CornerUpLeft size={13} /> Send back
+                            </Button>
+                            <Button size="sm" disabled={!canApprove}
+                              onClick={() => handleDecision(record, 'approved')}>
+                              <Check size={13} /> {record.approvalStage === 'enablement_head' ? 'Approve final' : 'Approve'}
+                            </Button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
                   {filteredQueue.length === 0 && (
-                    <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-500">No TC venues match the selected client, exam, or code.</td></tr>
+                    <tr><td colSpan={12} className="px-4 py-10 text-center text-sm text-slate-500">No TC venues match the selected client, exam, or code.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-            {!canSelectVenues && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Choose a client and exam to enable venue selection.</p>}
           </section>
 
           {selectedRecord && selectedRequirement && (
-            <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="grid gap-5">
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -478,10 +465,10 @@ export default function ApprovalsPage() {
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {[
-                    ['Temporary CCTV days', temporaryCctvDays.toLocaleString('en-IN')],
-                    ['Recorded cost till now', money(totalVenueCost)],
-                    ['Candidates till now', totalVenueCandidates.toLocaleString('en-IN')],
-                    ['Cost per candidate till now', totalVenueCandidates > 0 ? money(totalCostPerCandidate) : 'Unavailable'],
+                    [`${clientFilter || selectedRequirement.clientName} · ${examFilter || selectedRequirement.examName} · Temporary CCTV days`, temporaryCctvDays.toLocaleString('en-IN')],
+                    [`${clientFilter || selectedRequirement.clientName} · ${examFilter || selectedRequirement.examName} · Total recorded cost`, money(totalVenueCost)],
+                    [`${clientFilter || selectedRequirement.clientName} · ${examFilter || selectedRequirement.examName} · Candidates`, totalVenueCandidates.toLocaleString('en-IN')],
+                    [`${clientFilter || selectedRequirement.clientName} · ${examFilter || selectedRequirement.examName} · Cost per candidate`, totalVenueCandidates > 0 ? money(totalCostPerCandidate) : 'Unavailable'],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                       <p className="text-xs text-slate-500">{label}</p>
@@ -504,26 +491,29 @@ export default function ApprovalsPage() {
                     </thead>
                     <tbody>
                       {venueSchedule.slice().sort((left, right) =>
-                        (normalizeExamDate(left.examDate) || left.examDate).localeCompare(normalizeExamDate(right.examDate) || right.examDate)
+                        (normalizeExamDate(left.schedule?.examDate || '') || left.schedule?.examDate || '')
+                          .localeCompare(normalizeExamDate(right.schedule?.examDate || '') || right.schedule?.examDate || '')
                       ).map(schedule => {
-                        const item = venueRecords.find(entry => entry.record.id === schedule.installationRecordId);
-                        if (!item) return null;
-                        const scheduleVendor = data.vendors.find(vendor => vendor.id === item.record.vendorId);
-                        const showCost = !displayedScheduleCostIds.has(item.record.id);
-                        displayedScheduleCostIds.add(item.record.id);
+                        const scheduleVendor = indexes.vendorsById.get(schedule.record.vendorId);
+                        const showCost = !displayedScheduleCostIds.has(schedule.record.id);
+                        displayedScheduleCostIds.add(schedule.record.id);
                         return (
-                          <tr key={schedule.id} className="border-t border-slate-100">
-                            <td className="whitespace-nowrap px-3 py-2">{item.requirement.clientName}</td>
-                            <td className="whitespace-nowrap px-3 py-2">{item.requirement.examName}</td>
-                            <td className="whitespace-nowrap px-3 py-2">{dateLabel(schedule.examDate)}</td>
-                            <td className="whitespace-nowrap px-3 py-2">{schedule.scheduledCandidates.toLocaleString('en-IN')}</td>
+                          <tr key={schedule.schedule?.id || schedule.record.id} className="border-t border-slate-100">
+                            <td className="whitespace-nowrap px-3 py-2">{selectedRequirement.clientName}</td>
+                            <td className="whitespace-nowrap px-3 py-2">{selectedRequirement.examName}</td>
+                            <td className="whitespace-nowrap px-3 py-2">{schedule.schedule ? dateLabel(schedule.schedule.examDate) : 'Not recorded'}</td>
+                            <td className="whitespace-nowrap px-3 py-2">
+                              {schedule.schedule
+                                ? schedule.schedule.scheduledCandidates.toLocaleString('en-IN')
+                                : (indexes.candidatesByRecord.get(schedule.record.id) || 0).toLocaleString('en-IN')}
+                            </td>
                             <td className="whitespace-nowrap px-3 py-2">{scheduleVendor?.vendorName || 'Unavailable'}</td>
-                            <td className="whitespace-nowrap px-3 py-2">{showCost ? money(item.record.localVendorCost) : '—'}</td>
+                            <td className="whitespace-nowrap px-3 py-2">{showCost ? money(schedule.record.localVendorCost) : '—'}</td>
                           </tr>
                         );
                       })}
                       {venueSchedule.length === 0 && (
-                        <tr><td colSpan={6} className="px-3 py-5 text-center text-sm text-slate-500">No exam-date detail is recorded for this venue.</td></tr>
+                        <tr><td colSpan={6} className="px-3 py-5 text-center text-sm text-slate-500">No installation history is recorded for this venue.</td></tr>
                       )}
                     </tbody>
                     <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold">
@@ -538,39 +528,8 @@ export default function ApprovalsPage() {
                 </div>
               </div>
 
-              <div className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="font-semibold text-slate-900">Approval decision</h3>
-                <p className="mt-1 text-xs text-slate-500">Current quote: {money(selectedRecord.localVendorCost)} · {selectedVendor?.vendorName || 'Vendor unavailable'}</p>
-                {costFlags.length > 0 && (
-                  <button type="button" onClick={() => setAlertRecordId(selectedRecord.id)}
-                    className="mt-3 flex w-full animate-pulse items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-left text-sm text-amber-900">
-                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                    <span>{costFlags.length} cost alert{costFlags.length === 1 ? '' : 's'} · Click to inspect the comparison</span>
-                  </button>
-                )}
-                <div className="mt-4 space-y-3">
-                  <Textarea label={`Remarks for TC Code ${selectedRequirement.tcCode}`} rows={4}
-                    value={remarksByRecord[selectedRecord.id] || ''}
-                    onChange={event => setRemarksByRecord(previous => ({
-                      ...previous,
-                      [selectedRecord.id]: event.target.value,
-                    }))}
-                    placeholder="Required when approving a cost alert or sending the quote back." />
-                  <label className="flex items-start gap-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={exceptionApproval} onChange={event => setExceptionApproval(event.target.checked)}
-                      className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                    <span><strong>Exception approval</strong><span className="block text-xs text-slate-500">Requires remarks.</span></span>
-                  </label>
-                  {!isAllowedToAct && <p className="text-sm text-amber-700">Your role cannot approve this stage.</p>}
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button variant="outline" disabled={!isAllowedToAct} onClick={() => handleDecision('sent_back')}>
-                      <CornerUpLeft size={14} /> Send back
-                    </Button>
-                    <Button disabled={!isAllowedToAct} onClick={() => handleDecision('approved')}>
-                      <Check size={14} /> {selectedStage === 'surveillance_head' ? 'Approve and forward' : 'Approve final'}
-                    </Button>
-                  </div>
-                </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="font-semibold text-slate-900">Current venue approval history</h3>
                 <div className="mt-5 border-t border-slate-100 pt-4">
                   <h4 className="text-sm font-semibold text-slate-800">Venue approval history</h4>
                   {currentApprovalEvents.length === 0 ? (
@@ -600,7 +559,7 @@ export default function ApprovalsPage() {
         {detailsRecord && detailsRequirement && (() => {
           const records = data.installations.flatMap(record => {
             const requirement = data.requirements.find(item => item.id === record.requirementId);
-            return requirement && sameVenue(requirement, detailsRequirement)
+            return requirement && venueKey(requirement) === venueKey(detailsRequirement)
               ? [{ record, requirement }]
               : [];
           }).sort((left, right) => left.record.createdAt.localeCompare(right.record.createdAt));
@@ -608,7 +567,7 @@ export default function ApprovalsPage() {
           const schedule = data.examDates.filter(item => recordIds.has(item.installationRecordId));
           const totalCost = records.reduce((total, item) => total + item.record.localVendorCost, 0);
           const totalCandidates = records.reduce((total, item) =>
-            total + getCandidates(item.record, data.quoteRevisions, data.examDates), 0);
+            total + (indexes.candidatesByRecord.get(item.record.id) || 0), 0);
           const vendorGroups = [...new Set(records.map(item => item.record.vendorId))].map(vendorId => {
             const vendorRecords = records.filter(item => item.record.vendorId === vendorId);
             return {
@@ -616,7 +575,7 @@ export default function ApprovalsPage() {
               vendorName: data.vendors.find(vendor => vendor.id === vendorId)?.vendorName || 'Vendor unavailable',
               cost: vendorRecords.reduce((total, item) => total + item.record.localVendorCost, 0),
               candidates: vendorRecords.reduce((total, item) =>
-                total + getCandidates(item.record, data.quoteRevisions, data.examDates), 0),
+                total + (indexes.candidatesByRecord.get(item.record.id) || 0), 0),
             };
           });
           const displayedHistoryCostIds = new Set<string>();
@@ -682,7 +641,7 @@ export default function ApprovalsPage() {
                 <ol className="space-y-3">
                   {records.map(({ record, requirement }) => {
                     const vendorName = data.vendors.find(vendor => vendor.id === record.vendorId)?.vendorName || 'Vendor unavailable';
-                    const revisions = getRevisions(data.quoteRevisions, record.id);
+                    const revisions = indexes.revisionsByRecord.get(record.id) || [];
                     const events = data.approvalEvents.filter(event => event.installationRecordId === record.id);
                     return (
                       <li key={record.id} className="rounded-xl border border-slate-200 p-3">
@@ -757,33 +716,18 @@ export default function ApprovalsPage() {
   );
 }
 
-function getCostFlagsForRecord(
+function getCostFlags(
   record: InstallationRecord,
-  requirement: { clientName: string; examName: string } | undefined,
-  installations: InstallationRecord[],
-  requirements: ReturnType<typeof useAuth>['data']['requirements'],
-  revisions: QuoteRevision[],
-  examDates: Array<{ installationRecordId: string; scheduledCandidates: number }>
+  previous: QuoteRevision | undefined,
+  candidates: number,
+  peerValues: Array<{ id: string; cost: number; candidates: number; perCandidate: number }>
 ) {
-  if (!requirement) return [];
-  const history = getRevisions(revisions, record.id);
-  const previous = history.length > 1 ? history[history.length - 2] : undefined;
   const increase = previous && previous.localVendorCost > 0
     ? (record.localVendorCost - previous.localVendorCost) / previous.localVendorCost
     : undefined;
-  const candidates = getCandidates(record, revisions, examDates);
-  const peerValues = installations.flatMap(peer => {
-    if (peer.id === record.id) return [];
-    const peerRequirement = requirements.find(item => item.id === peer.requirementId);
-    if (peerRequirement?.clientName !== requirement.clientName ||
-      peerRequirement.examName !== requirement.examName) return [];
-    const peerCandidates = getCandidates(peer, revisions, examDates);
-    return peerCandidates > 0
-      ? [{ cost: peer.localVendorCost, perCandidate: peer.localVendorCost / peerCandidates }]
-      : [];
-  });
-  const averagePerCandidate = peerValues.length > 0
-    ? peerValues.reduce((total, value) => total + value.perCandidate, 0) / peerValues.length
+  const comparablePeers = peerValues.filter(peer => peer.candidates > 0);
+  const averagePerCandidate = comparablePeers.length > 0
+    ? comparablePeers.reduce((total, value) => total + value.perCandidate, 0) / comparablePeers.length
     : 0;
   const perCandidate = candidates > 0 ? record.localVendorCost / candidates : 0;
   return [
@@ -793,10 +737,10 @@ function getCostFlagsForRecord(
     ...(averagePerCandidate > 0 && perCandidate > averagePerCandidate * 1.25
       ? [`Cost per candidate (${money(perCandidate)}) is more than 25% above the client/exam average (${money(averagePerCandidate)}).`]
       : []),
-    ...(peerValues.length > 0 && record.localVendorCost > Math.max(...peerValues.map(value => value.cost))
+    ...(comparablePeers.length > 0 && record.localVendorCost > Math.max(...comparablePeers.map(value => value.cost))
       ? [`Current total venue cost (${money(record.localVendorCost)}) is higher than all other venues for this client/exam.`]
       : []),
-    ...(peerValues.length > 0 && perCandidate > Math.max(...peerValues.map(value => value.perCandidate))
+    ...(comparablePeers.length > 0 && perCandidate > Math.max(...comparablePeers.map(value => value.perCandidate))
       ? [`Current cost per candidate (${money(perCandidate)}) is higher than all other venues for this client/exam.`]
       : []),
   ];

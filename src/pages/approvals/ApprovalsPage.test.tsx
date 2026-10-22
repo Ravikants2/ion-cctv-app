@@ -90,14 +90,15 @@ describe('ApprovalsPage', () => {
     expect(screen.getByText(/Current quote increased 25% compared with its previous quote/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Close/i }));
 
-    fireEvent.click(screen.getByRole('button', { name: /Approve and forward/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Approve$/ }));
     expect(screen.getByText(/Remarks are mandatory when approving a cost alert or exception/)).toBeInTheDocument();
     expect(updateData).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks for TC Code TC-100' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Approval remarks for TC Code TC-100' }), {
       target: { value: 'Reviewed the increase against the updated venue setup.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Approve and forward/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Exception approval/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Approve$/ }));
 
     expect(updatedData?.installations[0].approvalStatus).toBe('pending');
     expect(updatedData?.installations[0].approvalStage).toBe('enablement_head');
@@ -105,6 +106,7 @@ describe('ApprovalsPage', () => {
       action: 'approved',
       remarks: 'Reviewed the increase against the updated venue setup.',
       stage: 'surveillance_head',
+      exception: true,
     });
   });
 
@@ -115,7 +117,7 @@ describe('ApprovalsPage', () => {
     expect(screen.getByText('Remarks are mandatory when sending a quote back.')).toBeInTheDocument();
     expect(updateData).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks for TC Code TC-100' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Approval remarks for TC Code TC-100' }), {
       target: { value: 'Please confirm the camera count and update the quote.' },
     });
     fireEvent.click(screen.getByRole('button', { name: /Send back/ }));
@@ -128,28 +130,56 @@ describe('ApprovalsPage', () => {
     });
   });
 
-  it('selects TC venues for bulk approval and requires remarks for cost discrepancies', () => {
+  it('approves one venue at a time and requires remarks for cost discrepancies', () => {
     render(<ApprovalsPage />);
 
-    fireEvent.change(screen.getByLabelText('Client Name'), { target: { value: 'Client' } });
-    fireEvent.change(screen.getByLabelText('Exam Name'), { target: { value: 'Exam' } });
-    fireEvent.click(screen.getByLabelText('Select all matching venues'));
-    fireEvent.click(screen.getByRole('button', { name: /Approve selected \(1\)/ }));
+    expect(screen.getByText('Test Venue', { selector: 'td' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Approve$/ }));
 
-    expect(screen.getByText(/Enter approval remarks for each selected venue with a cost alert/i)).toBeInTheDocument();
+    expect(screen.getByText(/Remarks are mandatory when approving a cost alert or exception/)).toBeInTheDocument();
     expect(updateData).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Remarks for TC Code TC-100' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Approval remarks for TC Code TC-100' }), {
       target: { value: 'Reviewed the venue increase against the updated scope.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Approve selected \(1\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Approve$/ }));
+    expect(screen.getByText('Cost alerts require an explicit exception approval.')).toBeInTheDocument();
+    expect(updateData).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Exception approval/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Approve$/ }));
 
     expect(updatedData?.installations[0].approvalStage).toBe('enablement_head');
     expect(updatedData?.approvalEvents[0]).toMatchObject({
       action: 'approved',
       remarks: 'Reviewed the venue increase against the updated scope.',
       stage: 'surveillance_head',
+      exception: true,
     });
+  });
+
+  it('shows TC Name after TC Code and normalizes Excel serial exam dates', () => {
+    mockData = {
+      ...initialData,
+      examDates: [{ ...initialData.examDates[0], examDate: '46264' }],
+    };
+    mockAuthData(mockData);
+
+    render(<ApprovalsPage />);
+
+    const codeCell = screen.getByText('TC-100', { selector: 'button' }).closest('td');
+    expect(codeCell?.nextElementSibling).toHaveTextContent('Test Venue');
+    expect(screen.getByText('30 Aug 2026')).toBeInTheDocument();
+    expect(screen.queryByText(/46264/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the installation quote visible when exam-date details are missing', () => {
+    mockData = { ...initialData, examDates: [] };
+    mockAuthData(mockData);
+
+    render(<ApprovalsPage />);
+
+    expect(screen.getAllByText('₹12,500', { selector: 'td' }).length).toBeGreaterThan(0);
+    expect(screen.getByText('Not recorded')).toBeInTheDocument();
   });
 
   it('shows all temporary CCTV days and aggregates recorded cost across venue installations', () => {
