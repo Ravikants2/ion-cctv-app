@@ -12,10 +12,10 @@ export interface User {
   name: string;
   email: string;
   role: Role;
-  passwordHash: string;
   zone?: string;
   customRoleId?: string;
   groupIds?: string[];
+  lastLoginAt?: string;
 }
 
 export interface AccessRole {
@@ -148,7 +148,7 @@ export interface QuotationFile {
   uploadedAt: string;
 }
 
-export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'IMPORT' | 'EXPORT' | 'LOGIN';
+export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'IMPORT' | 'EXPORT' | 'LOGIN' | 'LOGOUT';
 
 export interface AuditLog {
   id: string;

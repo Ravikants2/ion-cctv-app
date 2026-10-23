@@ -1,4 +1,5 @@
 import type { AppData } from '../types';
+import { getSessionAuthorizationHeader } from './storage';
 
 export interface ChatContext {
   summary: string;
@@ -240,7 +241,10 @@ export async function sendChatMessage(
   try {
     response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: getSessionAuthorizationHeader(),
+      },
       body: requestBody,
     });
   } catch (cause) {

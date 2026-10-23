@@ -9,7 +9,7 @@ vi.mock('../../context/AuthContext', () => ({ useAuth: vi.fn() }));
 const initialData: AppData = {
   users: [{
     id: 'approver-1', name: 'Surveillance Reviewer', email: 'surveillance@example.com',
-    role: 'surveillance_head', passwordHash: 'hash',
+    role: 'surveillance_head',
   }],
   requirements: [{
     id: 'requirement-1', zone: 'East 1', state: 'State', city: 'City',
@@ -75,8 +75,10 @@ describe('ApprovalsPage', () => {
       syncStatus: 'idle',
       syncError: '',
       isGitHub: false,
-      login: () => false,
-      logout: () => undefined,
+      login: async () => false,
+      logout: async () => undefined,
+      createUserAccount: async user => user,
+      changeUserPassword: async () => undefined,
       updateData,
       addAuditLog: vi.fn(),
       can: (action: string) => action === 'view_approvals' || action === 'approve_surveillance',

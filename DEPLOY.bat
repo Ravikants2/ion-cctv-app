@@ -1,10 +1,9 @@
 @echo off
 echo ============================================================
-echo  iON Survillance Temp. infra(CCTV) - GitHub Deploy Script
+echo  iON CCTV - secure GitHub deployment
 echo ============================================================
 echo.
 
-REM Check if git is installed
 git --version >nul 2>&1
 IF %ERRORLEVEL% NEQ 0 (
     echo ERROR: Git is not installed.
@@ -13,44 +12,28 @@ IF %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo [1/5] Initialising Git repository...
-git init
-git branch -M main
+git remote get-url origin | findstr /i "Ravikants2/ion-cctv-app.git" >nul
+IF %ERRORLEVEL% NEQ 0 (
+    echo ERROR: This folder is not configured for Ravikants2/ion-cctv-app.
+    echo No changes were pushed.
+    pause
+    exit /b 1
+)
 
-echo.
-echo [2/5] Adding remote origin...
-git remote remove origin 2>nul
-git remote add origin https://github.com/Ravikants2/ion-cctv-app.git
-
-echo.
-echo [3/5] Staging all files...
-git add .
-
-echo.
-echo [4/5] Creating initial commit...
-git commit -m "deploy: iON Survillance Temp. infra(CCTV) - initial release"
-
-echo.
-echo [5/5] Pushing to GitHub (main branch)...
-git push -u origin main --force
+echo Pushing the current main branch without force...
+git push -u origin main
+IF %ERRORLEVEL% NEQ 0 (
+    echo Push failed. No force push was attempted.
+    pause
+    exit /b 1
+)
 
 echo.
 echo ============================================================
-echo  DONE! Now go to GitHub and complete 2 quick steps:
-echo.
-echo  STEP A - Add secret DATA_PAT:
-echo    https://github.com/Ravikants2/ion-cctv-app/settings/secrets/actions/new
-echo    Name:  DATA_PAT
-echo    Value: (paste your GitHub Personal Access Token)
-echo.
-echo  STEP B - Enable GitHub Pages:
-echo    https://github.com/Ravikants2/ion-cctv-app/settings/pages
-echo    Source: GitHub Actions  ->  Save
-echo.
-echo  Then go to Actions tab to watch the build:
+echo  Check the Pages and Worker workflows:
 echo    https://github.com/Ravikants2/ion-cctv-app/actions
 echo.
-echo  Your app will be live at:
-echo    https://ravikants2.github.io/ion-cctv-app/
+echo  App URL: https://ravikants2.github.io/ion-cctv-app/
+echo  Real data stays in the private data repository.
 echo ============================================================
 pause

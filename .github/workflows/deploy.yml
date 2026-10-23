@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy iON CCTV to GitHub Pages
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -15,7 +15,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── 1. Build, test, deploy the React app ─────────────────────────────────────
   build-and-deploy:
     runs-on: ubuntu-latest
     environment:
@@ -23,16 +22,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Checkout main
+      - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 24
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: 24
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Type check
         run: npm run type-check
@@ -45,83 +45,23 @@ jobs:
 
       - name: Build
         env:
-          VITE_GITHUB_OWNER: ${{ github.repository_owner }}
-          VITE_GITHUB_REPO: ${{ github.event.repository.name }}
-          VITE_GITHUB_DATA_BRANCH: data
-          VITE_GITHUB_TOKEN: ${{ secrets.DATA_PAT }}
+          VITE_API_ENDPOINT: ${{ vars.VITE_API_ENDPOINT }}
           VITE_GEMINI_CHAT_ENDPOINT: ${{ vars.VITE_GEMINI_CHAT_ENDPOINT }}
-        run: npm run build
+        run: |
+          : "${VITE_API_ENDPOINT:?Add VITE_API_ENDPOINT to repository Actions variables}"
+          npm run build
 
-      - name: Copy 404.html for SPA routing
+      - name: Copy 404 page for SPA routing
         run: cp dist/index.html dist/404.html
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy site
         id: deployment
         uses: actions/deploy-pages@v4
-
-  # ── 2. Ensure data branch + db.json exist ────────────────────────────────────
-  init-data-branch:
-    runs-on: ubuntu-latest
-    needs: build-and-deploy
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-
-      - name: Create data branch and db.json if not exists
-        env:
-          GH_TOKEN: ${{ secrets.DATA_PAT }}
-          OWNER: ${{ github.repository_owner }}
-          REPO: ${{ github.event.repository.name }}
-        run: |
-          # Check if data branch exists
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$OWNER/$REPO/branches/data")
-
-          if [ "$STATUS" = "404" ]; then
-            echo "Creating data branch..."
-            # Get SHA of main HEAD
-            SHA=$(curl -s \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$OWNER/$REPO/git/refs/heads/main" \
-              | python3 -c "import sys,json; print(json.load(sys.stdin)['object']['sha'])")
-
-            # Create data branch from main
-            curl -s -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$OWNER/$REPO/git/refs" \
-              -d "{\"ref\":\"refs/heads/data\",\"sha\":\"$SHA\"}"
-            echo "data branch created."
-          else
-            echo "data branch already exists."
-          fi
-
-          # Check if db.json exists on data branch
-          DB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$OWNER/$REPO/contents/db.json?ref=data")
-
-          if [ "$DB_STATUS" = "404" ]; then
-            echo "Creating initial db.json..."
-            CONTENT=$(echo '{"users":[],"requirements":[],"vendors":[],"installations":[],"examDates":[],"quotations":[],"auditLogs":[]}' | base64 -w 0)
-            curl -s -X PUT \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$OWNER/$REPO/contents/db.json" \
-              -d "{\"message\":\"init: create db.json\",\"content\":\"$CONTENT\",\"branch\":\"data\"}"
-            echo "db.json created."
-          else
-            echo "db.json already exists."
-          fi

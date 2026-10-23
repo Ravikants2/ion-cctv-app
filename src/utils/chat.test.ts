@@ -5,7 +5,7 @@ import { buildChatContext, sendChatMessage } from './chat';
 const appData: AppData = {
   users: [{
     id: 'user-1', name: 'Sensitive User', email: 'private@example.com',
-    role: 'super_admin', passwordHash: 'secret-hash',
+    role: 'super_admin',
   }],
   requirements: [{
     id: 'requirement-1', zone: 'North', state: 'Delhi', city: 'Delhi',
@@ -107,6 +107,7 @@ describe('sendChatMessage', () => {
 
   it('sends the prompt, filtered context, and conversation to the configured service', async () => {
     vi.stubEnv('VITE_GEMINI_CHAT_ENDPOINT', 'https://chat.example/api/chat');
+    sessionStorage.setItem('ion_session', 'test-session-token');
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
       JSON.stringify({ answer: 'There is one installation.' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -125,6 +126,7 @@ describe('sendChatMessage', () => {
     expect(body.message).toBe('Count installations');
     expect(body.history).toEqual([{ role: 'user', text: 'Hello' }]);
     expect(JSON.stringify(body.context)).not.toContain('secret-hash');
+    expect(request?.headers).toMatchObject({ Authorization: 'Bearer test-session-token' });
 
     fetchMock.mockRestore();
     vi.unstubAllEnvs();
@@ -132,6 +134,7 @@ describe('sendChatMessage', () => {
 
   it('explains network and CORS fetch failures with deployment checks', async () => {
     vi.stubEnv('VITE_GEMINI_CHAT_ENDPOINT', 'https://chat.example/api/chat');
+    sessionStorage.setItem('ion_session', 'test-session-token');
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
 
     await expect(sendChatMessage('hello', buildChatContext(appData), []))
@@ -140,6 +143,7 @@ describe('sendChatMessage', () => {
 
   it('turns oversized detail requests into actionable concise guidance', async () => {
     vi.stubEnv('VITE_GEMINI_CHAT_ENDPOINT', 'https://chat.example/api/chat');
+    sessionStorage.setItem('ion_session', 'test-session-token');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
       JSON.stringify({ error: 'The loaded data is too large for one chat request.' }),
       { status: 413, headers: { 'Content-Type': 'application/json' } }
@@ -153,6 +157,7 @@ describe('sendChatMessage', () => {
 
   it('shrinks oversized detail requests before sending them to the worker', async () => {
     vi.stubEnv('VITE_GEMINI_CHAT_ENDPOINT', 'https://chat.example/api/chat');
+    sessionStorage.setItem('ion_session', 'test-session-token');
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
       JSON.stringify({ answer: 'Here is the requested summary.' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }

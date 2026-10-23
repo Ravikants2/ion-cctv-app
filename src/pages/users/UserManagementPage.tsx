@@ -7,10 +7,9 @@ import { Input, Select } from '../../components/ui/FormFields';
 import { Alert, ConfirmDialog, Modal } from '../../components/ui/index';
 import { SortableTable } from '../../components/ui/SortableTable';
 import { TablePagination } from '../../components/ui/TablePagination';
-import { hashPassword } from '../../utils/storage';
-import { ZONES, type AccessRole, type Role, type User, type UserGroup } from '../../types';
+import { ZONES, type AccessRole, type AppData, type Role, type User, type UserGroup } from '../../types';
 import { PERMISSION_SECTIONS } from '../../utils/permissions';
-import { KeyRound, Plus, Trash2, ShieldCheck, Users } from 'lucide-react';
+import { Activity, KeyRound, Plus, ShieldCheck, Trash2, Users } from 'lucide-react';
 
 const roleOptions = [
   { value: 'super_admin', label: 'Super Admin' },
@@ -23,6 +22,93 @@ const roleOptions = [
   { value: 'custom', label: 'Custom access role' },
 ];
 const PAGE_SIZE = 10;
+
+function summarizeAuditEntry(entry: AppData['auditLogs'][number]): string {
+  if (entry.action === 'LOGIN') return 'Signed in';
+  if (entry.action === 'LOGOUT') return 'Signed out';
+  if (entry.action === 'EXPORT') return `Exported ${entry.entityType}`;
+  const noun = entry.entityType.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  if (entry.action === 'CREATE') return `Created ${noun}`;
+  if (entry.action === 'DELETE') return `Deleted ${noun}`;
+
+  if (!entry.beforeJson || !entry.afterJson) return `Updated ${noun}`;
+  try {
+    const before = JSON.parse(entry.beforeJson) as Record<string, unknown>;
+    const after = JSON.parse(entry.afterJson) as Record<string, unknown>;
+    const changed = Object.keys(after).filter(key => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+    return changed.length > 0 ? `Updated ${noun}: ${changed.join(', ')}` : `Updated ${noun}`;
+  } catch {
+    return `Updated ${noun}`;
+  }
+}
+
+function UserActivity({ data }: { data: AppData }) {
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1_000;
+  const recent = data.auditLogs
+    .filter(entry => Number.isFinite(Date.parse(entry.timestamp)))
+    .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
+    .slice(0, 200);
+  const userNames = new Map(data.users.map(user => [user.id, user.name]));
+  const logins = recent.filter(entry => entry.action === 'LOGIN');
+  const activeUsers = new Set(logins
+    .filter(entry => Date.parse(entry.timestamp) >= sevenDaysAgo)
+    .map(entry => entry.userId)).size;
+
+  return (
+    <section className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[
+          ['Users', data.users.length],
+          ['Sign-ins (recent 200 events)', logins.length],
+          ['Users active in 7 days', activeUsers],
+        ].map(([label, value]) => (
+          <article key={label} className="rounded-xl border bg-white p-4 shadow-sm">
+            <p className="text-xs font-medium text-slate-500">{label}</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <div className="flex items-center gap-2 border-b px-4 py-3">
+          <Activity size={16} className="text-blue-600" />
+          <h2 className="font-semibold text-slate-900">Recent sign-ins and changes</h2>
+          <span className="ml-auto text-xs text-slate-500">Newest 200 events</span>
+        </div>
+        {recent.length === 0 ? (
+          <p className="p-6 text-center text-sm text-slate-500">No user activity has been recorded yet.</p>
+        ) : (
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-3 font-semibold">User</th>
+                <th className="px-4 py-3 font-semibold">Activity</th>
+                <th className="px-4 py-3 font-semibold">Record</th>
+                <th className="px-4 py-3 font-semibold">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map(entry => (
+                <tr key={entry.id} className="border-t">
+                  <td className="px-4 py-3 font-medium text-slate-800">
+                    {userNames.get(entry.userId) || 'Deleted user'}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700">{summarizeAuditEntry(entry)}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">
+                    {entry.entityId === entry.userId ? '—' : entry.entityId}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
+                    {new Date(entry.timestamp).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function PermissionEditor({
   permissions,
@@ -88,7 +174,9 @@ function PermissionEditor({
 }
 
 export default function UserManagementPage() {
-  const { data, updateData, addAuditLog, can, currentUser } = useAuth();
+  const {
+    data, updateData, addAuditLog, can, currentUser, createUserAccount, changeUserPassword, reloadFromGitHub,
+  } = useAuth();
   const [modal, setModal] = useState<'create' | 'password' | 'role' | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
@@ -102,7 +190,7 @@ export default function UserManagementPage() {
   const [newZone, setNewZone] = useState('');
   const [newCustomRoleId, setNewCustomRoleId] = useState('');
   const [newGroupIds, setNewGroupIds] = useState<string[]>([]);
-  const [accessTab, setAccessTab] = useState<'users' | 'roles' | 'groups'>('users');
+  const [accessTab, setAccessTab] = useState<'users' | 'roles' | 'groups' | 'activity'>('users');
   const [roleDraft, setRoleDraft] = useState<AccessRole | null>(null);
   const [groupDraft, setGroupDraft] = useState<UserGroup | null>(null);
   const [page, setPage] = useState(1);
@@ -125,12 +213,12 @@ export default function UserManagementPage() {
     setNewGroupIds([]);
   };
 
-  const createUser = (event: React.FormEvent<HTMLFormElement>) => {
+  const createUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const name = form.name.trim();
     const email = form.email.trim().toLowerCase();
-    if (name.length === 0 || email.length === 0 || form.password.length < 8) {
-      setAlert({ type: 'error', message: 'Enter a name, valid email, and password with at least 8 characters.' });
+    if (name.length === 0 || email.length === 0 || form.password.length < 12) {
+      setAlert({ type: 'error', message: 'Enter a name, valid email, and password with at least 12 characters.' });
       return;
     }
     if (form.role === 'zonal_user' && !form.zone) {
@@ -151,37 +239,34 @@ export default function UserManagementPage() {
       name,
       email,
       role: form.role,
-      passwordHash: hashPassword(form.password),
       zone: form.role === 'zonal_user' ? form.zone : undefined,
       customRoleId: form.role === 'custom' ? form.customRoleId : undefined,
       groupIds: form.groupIds,
     };
-    updateData(previous => ({
-      ...previous,
-      users: [...previous.users, user],
-      userGroups: previous.userGroups.map(group => user.groupIds?.includes(group.id)
-        ? { ...group, userIds: [...new Set([...group.userIds, user.id])] }
-        : group),
-    }));
-    addAuditLog('CREATE', 'User', user.id, undefined, { ...user, passwordHash: '[redacted]' });
-    closeModal();
-    setAlert({ type: 'success', message: 'User created.' });
+    try {
+      await createUserAccount(user, form.password);
+      await reloadFromGitHub();
+      closeModal();
+      setAlert({ type: 'success', message: 'User created.' });
+    } catch (error) {
+      setAlert({ type: 'error', message: (error as Error).message });
+    }
   };
 
-  const changePassword = (event: React.FormEvent<HTMLFormElement>) => {
+  const changePassword = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedUser || newPassword.length < 8) {
-      setAlert({ type: 'error', message: 'Password must contain at least 8 characters.' });
+    if (!selectedUser || newPassword.length < 12) {
+      setAlert({ type: 'error', message: 'Password must contain at least 12 characters.' });
       return;
     }
-    const updated = { ...selectedUser, passwordHash: hashPassword(newPassword) };
-    updateData(previous => ({
-      ...previous,
-      users: previous.users.map(user => user.id === updated.id ? updated : user),
-    }));
-    addAuditLog('UPDATE', 'User', updated.id, { passwordHash: '[redacted]' }, { passwordHash: '[changed]' });
-    closeModal();
-    setAlert({ type: 'success', message: `Password updated for ${selectedUser.name}.` });
+    try {
+      await changeUserPassword(selectedUser.id, newPassword);
+      await reloadFromGitHub();
+      closeModal();
+      setAlert({ type: 'success', message: `Password updated for ${selectedUser.name}.` });
+    } catch (error) {
+      setAlert({ type: 'error', message: (error as Error).message });
+    }
   };
 
   const changeRole = (event: React.FormEvent<HTMLFormElement>) => {
@@ -244,7 +329,7 @@ export default function UserManagementPage() {
         userIds: group.userIds.filter(userId => userId !== deleteUser.id),
       })),
     }));
-    addAuditLog('DELETE', 'User', deleteUser.id, { ...deleteUser, passwordHash: '[redacted]' }, undefined);
+    addAuditLog('DELETE', 'User', deleteUser.id, deleteUser, undefined);
     setAlert({ type: 'success', message: `Deleted ${deleteUser.name}.` });
     setDeleteUser(null);
   };
@@ -353,6 +438,7 @@ export default function UserManagementPage() {
           ['users', 'Users'],
           ['roles', 'Access roles'],
           ['groups', 'Groups'],
+          ['activity', 'User activity'],
         ] as const).map(([tab, label]) => (
           <button key={tab} type="button" onClick={() => { setAccessTab(tab); setRoleDraft(null); setGroupDraft(null); }}
             className={`border-b-2 px-3 py-2 text-sm font-medium ${accessTab === tab ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
@@ -364,7 +450,7 @@ export default function UserManagementPage() {
       {accessTab === 'users' && <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
         <SortableTable className="w-full text-sm">
           <thead><tr className="border-b bg-gray-50">
-            {['Name', 'Email', 'Role', 'Groups', 'Actions'].map(label => (
+            {['Name', 'Email', 'Role', 'Groups', 'Last sign-in', 'Actions'].map(label => (
               <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">{label}</th>
             ))}
           </tr></thead>
@@ -380,6 +466,9 @@ export default function UserManagementPage() {
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-600">
                   {(user.groupIds || []).map(groupId => data.userGroups.find(group => group.id === groupId)?.name).filter(Boolean).join(', ') || '—'}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
+                  {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
@@ -410,6 +499,8 @@ export default function UserManagementPage() {
         </SortableTable>
         <TablePagination page={currentPage} pageSize={PAGE_SIZE} totalItems={data.users.length} onPageChange={setPage} />
       </div>}
+
+      {accessTab === 'activity' && <UserActivity data={data} />}
 
       {accessTab === 'roles' && (
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(240px,0.75fr)_minmax(0,1.5fr)]">
@@ -539,7 +630,7 @@ export default function UserManagementPage() {
               </div>
             </fieldset>
           )}
-          <Input label="Temporary password" type="password" minLength={8} value={form.password}
+          <Input label="Temporary password" type="password" minLength={12} value={form.password}
             onChange={event => setForm(previous => ({ ...previous, password: event.target.value }))} required />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" onClick={closeModal}>Cancel</Button>
@@ -550,7 +641,7 @@ export default function UserManagementPage() {
 
       <Modal open={modal === 'password'} onClose={closeModal} title={`Change password${selectedUser ? ` — ${selectedUser.name}` : ''}`}>
         <form onSubmit={changePassword} className="flex flex-col gap-3">
-          <Input label="New password" type="password" minLength={8} value={newPassword}
+          <Input label="New password" type="password" minLength={12} value={newPassword}
             onChange={event => setNewPassword(event.target.value)} required />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" onClick={closeModal}>Cancel</Button>

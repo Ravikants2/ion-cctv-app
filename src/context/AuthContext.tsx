@@ -1,7 +1,18 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { User, AppData, AuditAction } from '../types';
-import { loadData, saveData, verifyPassword, getInitialData, isGitHubConfigured } from '../utils/storage';
+import {
+  changeManagedUserPassword,
+  createManagedUser,
+  getInitialData,
+  isGitHubConfigured,
+  loadData,
+  loginUser,
+  logoutUser,
+  recordExportAudit,
+  restoreSession,
+  saveData,
+} from '../utils/storage';
 import { BUILT_IN_ROLE_PERMISSIONS, userAssignedZones } from '../utils/permissions';
 
 export type SyncStatus = 'idle' | 'loading' | 'saving' | 'saved' | 'error';
@@ -12,8 +23,10 @@ interface AuthContextType {
   syncStatus: SyncStatus;
   syncError: string;
   isGitHub: boolean;
-  login: (email: string, password: string) => boolean;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  createUserAccount: (user: User, password: string) => Promise<User>;
+  changeUserPassword: (userId: string, password: string) => Promise<void>;
   updateData: (updater: (prev: AppData) => AppData) => void;
   addAuditLog: (action: AuditAction, entityType: string, entityId: string, before?: unknown, after?: unknown) => void;
   can: (action: string) => boolean;
@@ -28,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [syncError, setSyncError] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveGeneration = useRef(0);
   const signedInUser = currentUser ? data.users.find(user => user.id === currentUser.id) || currentUser : null;
   const assignedGroups = useMemo(() => signedInUser && signedInUser.role !== 'super_admin'
     ? data.userGroups.filter(group => (signedInUser.groupIds || []).includes(group.id) || group.userIds.includes(signedInUser.id))
@@ -72,15 +86,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Load data on mount
   useEffect(() => {
     setSyncStatus('loading');
-    loadData().then(loaded => {
+    restoreSession().then(async user => {
+      if (!user) {
+        setData(getInitialData());
+        setSyncStatus('idle');
+        return;
+      }
+      setCurrentUser(user);
+      const loaded = await loadData();
       setData(loaded);
       setSyncStatus('idle');
-      // Restore session
-      const storedId = sessionStorage.getItem('ion_user');
-      if (storedId) {
-        const u = loaded.users.find(u => u.id === storedId);
-        if (u) setCurrentUser(u);
-      }
     }).catch(e => {
       setSyncStatus('error');
       setSyncError((e as Error).message);
@@ -103,16 +118,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateData = useCallback((updater: (prev: AppData) => AppData) => {
     setData(prev => {
       const next = updater(prev);
-      // Debounce GitHub saves by 800ms to batch rapid updates
+      const generation = ++saveGeneration.current;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       setSyncStatus('saving');
       saveTimer.current = setTimeout(() => {
-        saveData(next, (err) => {
+        void saveData(next).then(saved => {
+          if (generation !== saveGeneration.current) return;
+          setData(saved);
+          setSyncStatus('saved');
+          setTimeout(() => {
+            if (generation === saveGeneration.current) setSyncStatus('idle');
+          }, 2000);
+        }).catch(error => {
+          if (generation !== saveGeneration.current) return;
           setSyncStatus('error');
-          setSyncError(err.message);
+          setSyncError((error as Error).message);
         });
-        setSyncStatus('saved');
-        setTimeout(() => setSyncStatus('idle'), 2000);
       }, 800);
       return next;
     });
@@ -122,6 +143,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     action: AuditAction, entityType: string, entityId: string,
     before?: unknown, after?: unknown
   ) => {
+    if (action === 'EXPORT') {
+      void recordExportAudit(entityType, entityId).then(setData).catch(error => {
+        setSyncStatus('error');
+        setSyncError((error as Error).message);
+      });
+      return;
+    }
     setData(prev => {
       const next = {
         ...prev,
@@ -138,19 +166,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [currentUser]);
 
-  const login = useCallback((email: string, password: string): boolean => {
-    const user = data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!user || !verifyPassword(password, user.passwordHash)) return false;
-    setCurrentUser(user);
-    sessionStorage.setItem('ion_user', user.id);
-    addAuditLog('LOGIN', 'User', user.id);
-    return true;
-  }, [data.users, addAuditLog]);
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const user = await loginUser(email, password);
+      setSyncStatus('loading');
+      const loaded = await loadData();
+      setData(loaded);
+      setCurrentUser(user);
+      setSyncError('');
+      setSyncStatus('idle');
+      return true;
+    } catch (error) {
+      const status = (error as Error & { status?: number }).status;
+      if (status === 401) return false;
+      if (currentUser === null) await logoutUser();
+      setSyncStatus('error');
+      setSyncError((error as Error).message);
+      throw error;
+    }
+  }, [currentUser]);
 
-  const logout = useCallback(() => {
-    setCurrentUser(null);
-    sessionStorage.removeItem('ion_user');
+  const logout = useCallback(async () => {
+    try {
+      await logoutUser();
+    } finally {
+      setCurrentUser(null);
+      setData(getInitialData());
+      setSyncStatus('idle');
+    }
   }, []);
+
+  const createUserAccount = useCallback((user: User, password: string) => (
+    createManagedUser(user, password)
+  ), []);
+
+  const changeUserPassword = useCallback((userId: string, password: string) => (
+    changeManagedUserPassword(userId, password)
+  ), []);
 
   const can = useCallback((action: string): boolean => {
     if (!signedInUser) return false;
@@ -189,7 +241,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={{
       currentUser: signedInUser, data: visibleData, syncStatus, syncError,
       isGitHub: isGitHubConfigured(),
-      login, logout, updateData, addAuditLog, can, reloadFromGitHub,
+      login, logout, createUserAccount, changeUserPassword, updateData, addAuditLog, can, reloadFromGitHub,
     }}>
       {children}
     </AuthContext.Provider>

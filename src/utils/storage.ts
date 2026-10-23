@@ -1,43 +1,17 @@
-import { v4 as uuidv4 } from 'uuid';
 import type { AppData, User } from '../types';
 
-// ─── GitHub API config (set via .env / GitHub Actions secrets) ───────────────
-const OWNER = import.meta.env.VITE_GITHUB_OWNER as string;
-const REPO  = import.meta.env.VITE_GITHUB_DATA_BRANCH
-  ? (import.meta.env.VITE_GITHUB_REPO as string)
-  : '';
-const BRANCH = (import.meta.env.VITE_GITHUB_DATA_BRANCH as string) || 'data';
-const TOKEN  = import.meta.env.VITE_GITHUB_TOKEN as string;
-const DATA_PATH = 'db.json';
+const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT?.replace(/\/+$/, '') || '';
+const SESSION_KEY = 'ion_session';
 
-const LOCAL_KEY  = 'ion_cctv_data';
-const LOCAL_SHA  = 'ion_cctv_sha';
-
-// ─── Password hashing (demo-safe deterministic hash) ─────────────────────────
-export function hashPassword(password: string): string {
-  let hash = 0;
-  for (let i = 0; i < password.length; i++) {
-    hash = (hash << 5) - hash + password.charCodeAt(i);
-    hash |= 0;
-  }
-  return 'demo_' + Math.abs(hash).toString(16);
+function clearLegacyClientData(): void {
+  localStorage.removeItem('ion_cctv_data');
+  localStorage.removeItem('ion_cctv_sha');
+  sessionStorage.removeItem('ion_user');
 }
-
-export function verifyPassword(plain: string, hash: string): boolean {
-  return hashPassword(plain) === hash;
-}
-
-// ─── Seed users ───────────────────────────────────────────────────────────────
-const SEED_USERS: User[] = [
-  { id: uuidv4(), name: 'Super Admin',  email: 'superadmin@ion.com', role: 'super_admin', passwordHash: hashPassword('Admin@123') },
-  { id: uuidv4(), name: 'Sub Admin',    email: 'subadmin@ion.com',   role: 'sub_admin',   passwordHash: hashPassword('Sub@123')   },
-  { id: uuidv4(), name: 'User One',     email: 'user@ion.com',       role: 'user',        passwordHash: hashPassword('User@123')  },
-  { id: uuidv4(), name: 'Viewer',       email: 'viewer@ion.com',     role: 'viewer',      passwordHash: hashPassword('View@123')  },
-];
 
 export function getInitialData(): AppData {
   return {
-    users: SEED_USERS,
+    users: [],
     requirements: [],
     vendors: [],
     installations: [],
@@ -55,12 +29,14 @@ export function getInitialData(): AppData {
 export function normalizeAppData(data: Partial<AppData>): AppData {
   const initial = getInitialData();
   const userGroups = Array.isArray(data.userGroups) ? data.userGroups : [];
-  const users = Array.isArray(data.users) && data.users.length > 0
+  const users = Array.isArray(data.users)
     ? data.users.map(user => ({
         ...user,
         groupIds: [...new Set([
           ...(Array.isArray(user.groupIds) ? user.groupIds : []),
-          ...userGroups.filter(group => group.userIds.includes(user.id)).map(group => group.id),
+          ...userGroups
+            .filter(group => Array.isArray(group.userIds) && group.userIds.includes(user.id))
+            .map(group => group.id),
         ])],
       }))
     : initial.users;
@@ -87,113 +63,119 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
   };
 }
 
-// ─── Local cache helpers ──────────────────────────────────────────────────────
-function readLocal(): AppData | null {
-  try {
-    const raw = localStorage.getItem(LOCAL_KEY);
-    return raw ? normalizeAppData(JSON.parse(raw) as Partial<AppData>) : null;
-  } catch { return null; }
-}
-
-function writeLocal(data: AppData): void {
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
-}
-
-// ─── GitHub API helpers ───────────────────────────────────────────────────────
-function githubHeaders(): HeadersInit {
-  return {
-    Authorization: `Bearer ${TOKEN}`,
-    Accept: 'application/vnd.github+json',
-    'Content-Type': 'application/json',
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-}
-
-function apiUrl(): string {
-  return `https://api.github.com/repos/${OWNER}/${REPO}/contents/${DATA_PATH}?ref=${BRANCH}`;
-}
-
 export function isGitHubConfigured(): boolean {
-  return !!(OWNER && REPO && TOKEN && OWNER !== 'your-github-username');
+  return Boolean(API_ENDPOINT);
 }
 
-/** Fetch data from GitHub data branch */
-export async function loadFromGitHub(): Promise<AppData> {
-  const res = await fetch(apiUrl(), { headers: githubHeaders() });
-  if (res.status === 404) {
-    // File doesn't exist yet — return initial data
-    return getInitialData();
-  }
-  if (!res.ok) throw new Error(`GitHub fetch failed: ${res.status}`);
-  const json = await res.json() as { content: string; sha: string };
-  const sha = json.sha;
-  const parsed = JSON.parse(atob(json.content.replace(/\n/g, ''))) as Partial<AppData>;
-  const decoded = normalizeAppData(parsed);
-  localStorage.setItem(LOCAL_SHA, sha);
-  if (!Array.isArray(parsed.users) || parsed.users.length === 0) {
-    writeLocal(decoded);
-    await saveToGitHub(decoded);
-    return decoded;
-  }
-  writeLocal(decoded);
-  return decoded;
+function getSessionToken(): string {
+  return sessionStorage.getItem(SESSION_KEY) || '';
 }
 
-/** Save data to GitHub data branch (creates or updates db.json) */
-export async function saveToGitHub(data: AppData): Promise<void> {
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
-  const sha = localStorage.getItem(LOCAL_SHA) || undefined;
+export function getSessionAuthorizationHeader(): string {
+  const token = getSessionToken();
+  if (!token) throw new Error('Sign in to use the chat service.');
+  return `Bearer ${token}`;
+}
 
-  const body: Record<string, unknown> = {
-    message: `data: update ${new Date().toISOString()}`,
-    content,
-    branch: BRANCH,
-  };
-  if (sha) body.sha = sha;
+function apiError(message: string, status: number): Error & { status: number } {
+  return Object.assign(new Error(message), { status });
+}
 
-  const res = await fetch(
-    `https://api.github.com/repos/${OWNER}/${REPO}/contents/${DATA_PATH}`,
-    { method: 'PUT', headers: githubHeaders(), body: JSON.stringify(body) }
+async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  includeSession = true
+): Promise<T> {
+  if (!API_ENDPOINT) throw new Error('The secure Worker API endpoint is not configured.');
+  const headers = new Headers(options.headers);
+  headers.set('Content-Type', 'application/json');
+  const token = includeSession ? getSessionToken() : '';
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const response = await fetch(`${API_ENDPOINT}${path}`, { ...options, headers });
+  const result = await response.json().catch(() => ({})) as { error?: string } & T;
+  if (!response.ok) {
+    if (response.status === 401 && includeSession) sessionStorage.removeItem(SESSION_KEY);
+    throw apiError(result.error || `Secure service request failed (${response.status}).`, response.status);
+  }
+  return result;
+}
+
+export async function restoreSession(): Promise<User | null> {
+  clearLegacyClientData();
+  if (!getSessionToken()) return null;
+  try {
+    const result = await apiRequest<{ user: User }>('/api/auth/session');
+    return result.user;
+  } catch (error) {
+    if ((error as Error & { status?: number }).status === 401) return null;
+    throw error;
+  }
+}
+
+export async function loginUser(email: string, password: string): Promise<User> {
+  const result = await apiRequest<{ token: string; user: User }>(
+    '/api/auth/login',
+    { method: 'POST', body: JSON.stringify({ email, password }) },
+    false
   );
-  if (!res.ok) {
-    const err = await res.json() as { message?: string };
-    throw new Error(`GitHub save failed: ${err.message || res.status}`);
-  }
-  const result = await res.json() as { content: { sha: string } };
-  localStorage.setItem(LOCAL_SHA, result.content.sha);
-  writeLocal(data);
+  sessionStorage.setItem(SESSION_KEY, result.token);
+  return result.user;
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/** Load data: GitHub first, fall back to localStorage, then seed */
-export async function loadData(): Promise<AppData> {
-  if (isGitHubConfigured()) {
-    try {
-      return await loadFromGitHub();
-    } catch {
-      // GitHub unreachable — use local cache
-      const local = readLocal();
-      return local ?? getInitialData();
+export async function logoutUser(): Promise<void> {
+  try {
+    if (getSessionToken()) {
+      await apiRequest('/api/auth/logout', { method: 'POST', body: '{}' });
     }
+  } finally {
+    sessionStorage.removeItem(SESSION_KEY);
+    clearLegacyClientData();
   }
-  const local = readLocal();
-  if (!local) {
-    const initial = getInitialData();
-    writeLocal(initial);
-    return initial;
-  }
-  return local;
 }
 
-/** Save data: always write local immediately, then push to GitHub async */
-export function saveData(data: AppData, onError?: (e: Error) => void): void {
-  writeLocal(data);
-  if (isGitHubConfigured()) {
-    saveToGitHub(data).catch(e => {
-      console.error('GitHub sync failed:', e);
-      onError?.(e as Error);
+export async function createManagedUser(user: User, password: string): Promise<User> {
+  const result = await apiRequest<{ user: User }>('/api/users', {
+    method: 'POST',
+    body: JSON.stringify({ user, password }),
+  });
+  return result.user;
+}
+
+export async function changeManagedUserPassword(userId: string, password: string): Promise<void> {
+  const result = await apiRequest<{ token?: string }>(`/api/users/${encodeURIComponent(userId)}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ password }),
+  });
+  if (result.token) sessionStorage.setItem(SESSION_KEY, result.token);
+}
+
+export async function recordExportAudit(entityType: string, entityId: string): Promise<AppData> {
+  const result = await apiRequest<{ data: Partial<AppData> }>('/api/audit', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'EXPORT', entityType, entityId }),
+  });
+  return normalizeAppData(result.data);
+}
+
+/** Load authenticated application data through the server-side Worker API. */
+export async function loadData(): Promise<AppData> {
+  const data = await apiRequest<Partial<AppData>>('/api/data');
+  return normalizeAppData(data);
+}
+
+/** Save application changes through the authenticated Worker API. */
+export async function saveData(data: AppData, onError?: (error: Error) => void): Promise<AppData> {
+  try {
+    const result = await apiRequest<{ data: Partial<AppData> }>('/api/data', {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
     });
+    return normalizeAppData(result.data);
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    onError?.(failure);
+    throw failure;
   }
 }
 
@@ -201,10 +183,10 @@ export function saveData(data: AppData, onError?: (e: Error) => void): void {
 export function exportBackup(data: AppData): void {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `ion-cctv-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `ion-cctv-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.click();
   URL.revokeObjectURL(url);
 }
 
@@ -212,10 +194,12 @@ export function exportBackup(data: AppData): void {
 export function importBackup(file: File): Promise<AppData> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = event => {
       try {
-        resolve(normalizeAppData(JSON.parse(e.target?.result as string) as Partial<AppData>));
-      } catch { reject(new Error('Invalid backup file')); }
+        resolve(normalizeAppData(JSON.parse(event.target?.result as string) as Partial<AppData>));
+      } catch {
+        reject(new Error('Invalid backup file'));
+      }
     };
     reader.onerror = () => reject(new Error('Failed to read file'));
     reader.readAsText(file);

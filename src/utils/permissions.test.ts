@@ -39,7 +39,7 @@ describe('built-in least-privilege policies', () => {
 describe('normalizeAppData', () => {
   it('routes legacy installations without approval metadata to first-stage review', () => {
     const user: User = {
-      id: 'user-1', name: 'User', email: 'user@example.com', role: 'user', passwordHash: 'hash',
+      id: 'user-1', name: 'User', email: 'user@example.com', role: 'user',
     };
     const normalized = normalizeAppData({
       users: [user],
@@ -60,7 +60,7 @@ describe('normalizeAppData', () => {
   it('preserves explicit final approvals and restores group memberships from group data', () => {
     const normalized = normalizeAppData({
       users: [{
-        id: 'user-1', name: 'User', email: 'user@example.com', role: 'user', passwordHash: 'hash',
+        id: 'user-1', name: 'User', email: 'user@example.com', role: 'user',
       }],
       installations: [{
         id: 'approved-1', requirementId: 'requirement-1', installationType: 'Full Vendor',

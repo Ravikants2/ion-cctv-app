@@ -33,7 +33,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const restoreRef = useRef<HTMLInputElement>(null);
   const visibleNavItems = navItems.filter(item => can(item.permission));
 
-  const handleLogout = () => { logout(); navigate('/login'); };
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      navigate('/login');
+    }
+  };
 
   const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -46,7 +52,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   };
 
   const SyncIcon = () => {
-    if (!isGitHub) return <span title="GitHub not configured"><CloudOff size={14} className="text-white/40" /></span>;
+    if (!isGitHub) return <span title="Secure Worker API not configured"><CloudOff size={14} className="text-white/40" /></span>;
     if (syncStatus === 'loading') return <Loader2 size={14} className="text-white/70 animate-spin" />;
     if (syncStatus === 'saving')  return <Loader2 size={14} className="text-yellow-300 animate-spin" />;
     if (syncStatus === 'saved')   return <CheckCircle2 size={14} className="text-green-300" />;
@@ -164,7 +170,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {syncStatus === 'error' && (
           <div className="bg-red-600 text-white text-xs px-4 py-1 flex items-center gap-2">
             <AlertCircle size={12} />
-            GitHub sync error: {syncError} — data saved locally.
+            Secure sync error: {syncError} — the server may not have saved this change.
           </div>
         )}
       </header>

@@ -1,85 +1,42 @@
-# iON Survillance Temp. infra(CCTV)
+# iON Surveillance Temporary Infrastructure (CCTV)
 
 **Live URL:** https://ravikants2.github.io/ion-cctv-app/
 
----
+## Deployment and secure data setup
 
-## How to Deploy (No Node.js needed on your PC)
+The public GitHub Pages site contains only the frontend. Sign-in, account management, audit logging, and application data access run through a Cloudflare Worker. The application database is stored in the private `Ravikants2/ion-cctv-private-data` repository; the public app repository must never receive a data-repository token.
 
-All building happens on GitHub's servers via GitHub Actions. You only need **Git** installed.
+### 1. Configure the secure Worker
 
----
+The API Worker and its deployment secrets are maintained in the separate `Ravikants2/tempcctv` repository. The public app repository does not store Cloudflare credentials or the private-data token. Configure Worker secrets in **tempcctv → Settings → Secrets and variables → Actions → Repository secrets**:
 
-### Step 1 — Create a GitHub Personal Access Token (PAT)
+| Secret | Purpose |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with permission to deploy Workers |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account that owns the Worker |
+| `DATA_PAT` | Fine-grained GitHub token restricted to `ion-cctv-private-data`, with Contents read/write access |
+| `SESSION_SECRET` | Random secret of at least 32 characters used to sign sessions |
+| `BOOTSTRAP_ADMIN_EMAIL` | Email address for the initial Super Admin |
+| `BOOTSTRAP_ADMIN_PASSWORD` | Initial Super Admin password (at least 12 characters) |
+| `GEMINI_API_KEY` | Optional; required only to enable AI chat |
 
-This token lets the live app read/write data to your GitHub repo.
+Never put these credentials in source files, browser environment variables, issues, or chat. `DATA_PAT` is uploaded only to the Worker by the `tempcctv` deployment workflow; the Pages build does not receive it.
 
-1. Open: https://github.com/settings/tokens?type=beta
-2. Click **Generate new token**
-3. Name: `ion-cctv-data`
-4. Expiration: 1 year
-5. Repository access → **Only select repositories** → pick `ion-cctv-app`
-6. Permissions:
-   - **Contents** → Read and write
-   - **Pages** → Read and write
-7. Click **Generate token** — copy it immediately
+The Worker reads and writes `db.json` on the private repository's `data` branch. Each save is a Git commit there. Users' passwords are stored as salted PBKDF2 hashes, session tokens expire after eight hours, and server-generated audit records track sign-ins, sign-outs, exports, and application changes. No application data is cached for offline use.
 
----
+### 2. Configure Pages
 
-### Step 2 — Add the Token as a Secret
+1. In the app repository, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**.
+2. Under **Settings → Secrets and variables → Actions → Variables**, set `VITE_API_ENDPOINT` to `https://ion-cctv-tempcctv.ion-cctv-chat-99.workers.dev` and `VITE_GEMINI_CHAT_ENDPOINT` to `https://ion-cctv-tempcctv.ion-cctv-chat-99.workers.dev/api/chat`.
+3. Ensure the private data repository exists and contains the migrated `db.json` on its `data` branch.
+4. Deploy the Worker from `tempcctv` and wait for its Worker workflow to succeed. Then push app changes to this repository's `main` branch; its Pages workflow builds and publishes the frontend. Watch the Pages workflow under this repository's **Actions** tab.
+5. Sign in using the bootstrap admin credentials. Reset passwords for existing accounts from User Management; old client-side password credentials are not used by the secure login.
 
-1. Open: https://github.com/Ravikants2/ion-cctv-app/settings/secrets/actions/new
-2. Name: `DATA_PAT`
-3. Value: paste your token
-4. Click **Add secret**
+For local development, put `VITE_API_ENDPOINT` and `VITE_GEMINI_CHAT_ENDPOINT` in an ignored `.env.local` file. Add `http://localhost:5173` to the Worker `ALLOWED_ORIGINS` setting when using the local Vite server; retain the production origin as well.
 
----
+### Security notice
 
-### Step 3 — Enable GitHub Pages
-
-1. Open: https://github.com/Ravikants2/ion-cctv-app/settings/pages
-2. Under **Source** select **GitHub Actions**
-3. Click **Save**
-
----
-
-### Step 4 — Push the Code (one double-click)
-
-1. Make sure **Git** is installed: https://git-scm.com/download/win
-2. Double-click **`DEPLOY.bat`** in this folder
-3. It will push all files to GitHub automatically
-
----
-
-### Step 5 — Watch the Build
-
-- Open: https://github.com/Ravikants2/ion-cctv-app/actions
-- The workflow runs in ~2 minutes and deploys to GitHub Pages
-- App goes live at: **https://ravikants2.github.io/ion-cctv-app/**
-
----
-
-## How Data is Stored in GitHub
-
-```
-Your Browser
-    │
-    ├── READ  → GitHub API → data branch → db.json
-    └── WRITE → GitHub API → commits new db.json to data branch
-```
-
-- All data lives in the `data` branch of this repo as `db.json`
-- Every save = a new Git commit (full history preserved)
-- Works offline too — cached in browser localStorage, syncs when online
-- The `data` branch and `db.json` are created automatically on first deploy
-
----
-
----
-
-## For Future Updates
-
-Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys automatically.
+The former public `data` branch was removed after the database had been publicly accessible. Treat information previously stored there as exposed: deleting a branch cannot remove copies, forks, clones, or all historical objects. Rotate any credentials that may have been present and review the private database before production use.
 
 ---
 
@@ -92,7 +49,7 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 - Zone-wise Vendor Master upload/download with round-trippable `Zone-12345` Vendor IDs
 - Venue analysis with multi-select temporary CCTV day filters, camera counts, hover details, top-cost rankings, and zone comparisons
 - Case-insensitive vendor and zone matching for vendor setup and imports
-- Super Admin user management: create/delete users, change roles, and change passwords
+- Super Admin user management: create/delete users, change roles, reset passwords, and review sign-in/change activity
 - Installation Record (single entry + bulk upload)
 - Exam date-wise candidate tracking
 - Quotation PDF upload and view
@@ -108,37 +65,17 @@ Double-click **`PUSH_UPDATE.bat`** — GitHub Actions rebuilds and redeploys aut
 - Excel export + PDF/Print reports (A4 landscape)
 - Role-based access: Super Admin / Sub Admin / User / Viewer / Zonal User / Surveillance Head / Head of Enablement / configured custom roles
 - Backup & Restore (JSON download/upload from header menu)
-- All data synced to GitHub `data` branch
+- Application data synced through the Worker to the private GitHub data repository
 - Gemini-powered chat over structured application records
 
-Access roles and zone restrictions are enforced in the client application. They are not server-side authorization boundaries; use a backend with server-enforced access controls before relying on them to protect sensitive data.
+The Worker enforces authentication for data access, account administration, and chat. Fine-grained page permissions and zone scopes are still applied in the client application and are not server-side access boundaries. Do not rely on those scopes to isolate sensitive data between users.
 
-## Gemini data chat (demo setup)
+## Gemini data chat
 
-The **AI Chat** page sends the current requirements, vendors, joined installation/exam records, and chat messages to Gemini through a Cloudflare Worker. Joined records let it answer cross-category questions (for example, candidates or costs by vendor and exam) and calculate results from the loaded rows. If a question is ambiguous or the data cannot answer it, the assistant asks a follow-up and offers choices from the available data. It excludes user accounts/password hashes, audit logs, and quotation file contents. Chat history is kept only in the current browser tab and is not saved.
+The **AI Chat** page sends the current requirements, vendors, joined installation/exam records, and chat messages to Gemini through the authenticated Cloudflare Worker. It excludes user accounts/password hashes, audit logs, and quotation file contents. Chat history is kept only in the current browser tab and is not saved. Operational context is sent to Google Gemini for processing; do not use the feature for data that must not be shared with that service.
 
-The Gemini key must stay in the Worker and must never be added to the frontend, a `VITE_*` secret, or this repository.
+The Gemini key must stay in the Worker and must never be added to the frontend, a `VITE_*` variable, or this repository.
 
 The Worker uses `gemini-3.1-flash-lite` by default and retries a request with `gemini-3.8-flash` if the first model returns HTTP 404 (unavailable model) or 429 (rate limit/quota). These defaults can be changed with the `GEMINI_MODEL` and `GEMINI_FALLBACK_MODEL` variables in `worker/wrangler.toml`. A different model may have separate model-specific limits, but no model is guaranteed to have unlimited quota; check the active project limits in Google AI Studio.
 
-### Deploy the chat Worker
-
-1. Create a Cloudflare account and install Wrangler (`npm install --global wrangler`), then authenticate with `npx wrangler login`.
-2. Deploy the Worker from the repository root:
-
-   ```powershell
-   npx wrangler deploy --config worker/wrangler.toml
-   ```
-
-3. Store the rotated Gemini key as a Worker secret (do not paste it into chat or a source file):
-
-   ```powershell
-   npx wrangler secret put GEMINI_API_KEY --config worker/wrangler.toml
-   ```
-
-4. In the GitHub repository, open **Settings → Secrets and variables → Actions → Variables** and add `VITE_GEMINI_CHAT_ENDPOINT` with the HTTPS URL Wrangler assigned to the Worker. Re-run the Pages workflow to publish the chat endpoint configuration.
-5. For local development, set `VITE_GEMINI_CHAT_ENDPOINT` in an ignored `.env.local` file. Set the Worker `ALLOWED_ORIGINS` to include `http://localhost:5173` when testing locally; keep the production GitHub Pages origin in the list as well.
-
-If chat reports that it cannot reach the service, verify that `VITE_GEMINI_CHAT_ENDPOINT` is the deployed Worker URL and that the app's exact origin (including scheme and host) is listed in the Worker `ALLOWED_ORIGINS`; then redeploy the Worker and rebuild the Pages app after changing its endpoint.
-
-The Worker allows only the configured browser origins, limits request size, and forwards the Gemini key only in a server-to-server request. **This is still a demo, not production authorization:** CORS does not authenticate users, and the app's existing login runs in the browser. Do not use chat with sensitive/confidential data or rely on it for per-user data isolation. Production use requires server-verified authentication, access checks, and rate limiting before enabling this endpoint for real users.
+The Worker allows only configured browser origins, requires a signed-in session, limits request size, and forwards the Gemini key only in a server-to-server request. Configure `ALLOWED_ORIGINS` in `worker/wrangler.toml` to match the exact site origins. For model selection and quota behavior, see `GEMINI_MODEL` and `GEMINI_FALLBACK_MODEL` in that file.
